@@ -22,7 +22,8 @@
 
 // ─── DOM refs ──────────────────────────────────────────────────────────────────
 
-const msgList     = document.getElementById('messages')
+const msgList     = document.getElementById('messages-inner')
+const scrollEl    = document.getElementById('messages')
 const emptyState  = document.getElementById('empty-state')
 const titleEl     = document.getElementById('chat-title')
 const metaEl      = document.getElementById('chat-meta')
@@ -38,6 +39,7 @@ let currentSessionId    = null
 let currentStatus       = 'idle'  // 'idle' | 'running' | 'done' | 'error' | 'aborted'
 let autoScrolling       = true
 let historyMessages     = null    // pre-loaded existingMessages from a history entry
+let isReplayingHistory  = false   // true only while replaying history events (not live polling)
 
 // ─── URL params ────────────────────────────────────────────────────────────────
 
@@ -52,12 +54,12 @@ const autorun       = params.get('autorun') === '1'
 
 function scrollToBottom(force = false) {
   if (force || autoScrolling) {
-    msgList.scrollTop = msgList.scrollHeight
+    scrollEl.scrollTop = scrollEl.scrollHeight
   }
 }
 
-msgList.addEventListener('scroll', () => {
-  const atBottom = msgList.scrollHeight - msgList.scrollTop - msgList.clientHeight < 60
+scrollEl.addEventListener('scroll', () => {
+  const atBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 60
   autoScrolling = atBottom
   fabBottom.classList.toggle('visible', !atBottom)
 })
@@ -283,7 +285,11 @@ function applyEvent(event) {
   switch (event.type) {
     case 'start':
       setStatusPill('running')
-      if (event.prompt) titleEl.textContent = event.prompt.slice(0, 60)
+      if (event.prompt) {
+        // Only render user bubble during history replay — live chat already rendered it in handleSend
+        if (isReplayingHistory) appendUserMsg(event.prompt)
+        titleEl.textContent = event.prompt.slice(0, 60)
+      }
       appendMeta(`Started · model: ${event.model || '?'}`)
       break
 
@@ -539,7 +545,21 @@ btnAbort.addEventListener('click', () => {
 
       // Replay the full UI event log if available
       if (rec.events?.length) {
-        for (const event of rec.events) applyEvent(event)
+        isReplayingHistory = true
+        // Skip the first 'start' event's user bubble — already rendered above via rec.prompt
+        let skippedFirst = false
+        for (const event of rec.events) {
+          if (!skippedFirst && event.type === 'start') {
+            skippedFirst = true
+            // Render start event but suppress the user bubble (already shown)
+            isReplayingHistory = false
+            applyEvent(event)
+            isReplayingHistory = true
+            continue
+          }
+          applyEvent(event)
+        }
+        isReplayingHistory = false
       } else if (rec.result) {
         // Fallback for older records without events[]
         appendDone(rec.result, rec.iterations)

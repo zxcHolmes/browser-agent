@@ -12,12 +12,13 @@
       --bg:       canvas;
       --panel:    color-mix(in oklab, canvas 93%, canvasText 7%);
       --panel2:   color-mix(in oklab, canvas 87%, canvasText 13%);
-      --border:   color-mix(in oklab, canvasText 12%, transparent);
-      --muted:    color-mix(in oklab, canvasText 52%, transparent);
+      --border:   color-mix(in oklab, canvasText 10%, transparent);
+      --muted:    color-mix(in oklab, canvasText 45%, transparent);
       --success:  #16a34a;
       --error:    #dc2626;
       --warning:  #d97706;
-      --shadow:   0 2px 12px color-mix(in oklab, canvasText 8%, transparent);
+      --shadow:   0 4px 20px color-mix(in oklab, canvasText 10%, transparent);
+      --radius:   18px;
       font-family: ui-rounded, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
       line-height: 1.5;
     }
@@ -32,79 +33,102 @@
       overflow: hidden;
     }
 
+    /* ── Centered content wrapper ── */
+    .inner {
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
     /* ── Top bar ── */
     .topbar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 16px;
       border-bottom: 1px solid var(--border);
       background: var(--panel);
       flex-shrink: 0;
-      min-height: 52px;
+      min-height: 54px;
     }
-    .topbar-logo { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+    .topbar .inner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-top: 12px;
+      padding-bottom: 12px;
+    }
+    .topbar-logo { width: 26px; height: 26px; border-radius: 7px; overflow: hidden; flex-shrink: 0; }
     .topbar-logo img { width: 100%; height: 100%; }
     .topbar-title { font-size: 14px; font-weight: 600; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .topbar-meta { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+    .topbar-meta { font-size: 11px; color: var(--muted); flex-shrink: 0; }
 
     .status-pill {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
       flex-shrink: 0;
     }
-    .pill-running { background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent); }
-    .pill-done    { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); }
-    .pill-error   { background: color-mix(in oklab, var(--error) 15%, transparent); color: var(--error); }
-    .pill-aborted { background: color-mix(in oklab, var(--warning) 15%, transparent); color: var(--warning); }
-    .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .pill-running { background: color-mix(in oklab, var(--accent) 12%, transparent); color: var(--accent); }
+    .pill-done    { background: color-mix(in oklab, var(--success) 12%, transparent); color: var(--success); }
+    .pill-error   { background: color-mix(in oklab, var(--error) 12%, transparent); color: var(--error); }
+    .pill-aborted { background: color-mix(in oklab, var(--warning) 12%, transparent); color: var(--warning); }
+    .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 
     /* ── Message list ── */
     .messages {
       flex: 1;
       overflow-y: auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
       scroll-behavior: smooth;
     }
+    .messages-inner {
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 100%;
+    }
+    /* scrollbar */
+    .messages::-webkit-scrollbar { width: 5px; }
+    .messages::-webkit-scrollbar-track { background: transparent; }
+    .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
     /* empty state */
     .msg-empty {
-      flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       color: var(--muted);
       font-size: 14px;
-      gap: 8px;
+      gap: 10px;
       text-align: center;
+      padding: 80px 0 60px;
     }
-    .msg-empty svg { opacity: .4; }
+    .msg-empty svg { opacity: .3; }
+    .msg-empty-label { font-size: 13px; font-weight: 500; }
+    .msg-empty-hint { font-size: 12px; opacity: .7; }
 
     /* message bubbles */
     .msg {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 3px;
       max-width: 100%;
     }
     .msg-role {
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 10px;
+      font-weight: 700;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: .04em;
-      padding: 0 4px;
+      letter-spacing: .06em;
+      padding: 0 6px;
     }
     .msg-bubble {
       padding: 10px 14px;
-      border-radius: 14px;
-      font-size: 13px;
-      line-height: 1.55;
+      border-radius: var(--radius);
+      font-size: 13.5px;
+      line-height: 1.6;
       word-break: break-word;
       white-space: pre-wrap;
       border: 1px solid var(--border);
@@ -112,26 +136,27 @@
 
     /* user prompt */
     .msg-user .msg-bubble {
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      background: linear-gradient(140deg, var(--accent), var(--accent2));
       color: #fff;
       border-color: transparent;
       align-self: flex-end;
-      border-bottom-right-radius: 4px;
+      border-bottom-right-radius: 5px;
+      box-shadow: 0 2px 10px color-mix(in oklab, var(--accent) 30%, transparent);
     }
     .msg-user { align-items: flex-end; }
-    .msg-user .msg-role { color: color-mix(in oklab, var(--accent) 80%, canvasText 20%); }
+    .msg-user .msg-role { color: color-mix(in oklab, var(--accent) 70%, canvasText 30%); }
 
     /* assistant reply */
     .msg-assistant .msg-bubble {
       background: var(--panel);
-      border-bottom-left-radius: 4px;
+      border-bottom-left-radius: 5px;
     }
     .msg-assistant { align-items: flex-start; }
 
     /* tool call */
     .msg-tool_call .msg-bubble {
-      background: color-mix(in oklab, var(--accent) 8%, var(--panel2));
-      border-color: color-mix(in oklab, var(--accent) 25%, transparent);
+      background: color-mix(in oklab, var(--accent) 6%, var(--panel2));
+      border-color: color-mix(in oklab, var(--accent) 20%, transparent);
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       font-size: 12px;
     }
@@ -142,22 +167,22 @@
 
     /* tool result */
     .msg-tool_result .msg-bubble {
-      background: color-mix(in oklab, var(--success) 8%, var(--panel2));
-      border-color: color-mix(in oklab, var(--success) 20%, transparent);
+      background: color-mix(in oklab, var(--success) 6%, var(--panel2));
+      border-color: color-mix(in oklab, var(--success) 16%, transparent);
       font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       font-size: 12px;
-      color: color-mix(in oklab, canvasText 75%, transparent);
+      color: color-mix(in oklab, canvasText 70%, transparent);
     }
     .result-label { font-weight: 700; color: var(--success); }
 
     /* screenshot */
     .msg-screenshot .msg-bubble {
-      padding: 6px;
+      padding: 5px;
       background: var(--panel2);
     }
     .msg-screenshot img {
       max-width: 100%;
-      border-radius: 10px;
+      border-radius: 14px;
       display: block;
     }
 
@@ -174,15 +199,15 @@
 
     /* error */
     .msg-error .msg-bubble {
-      background: color-mix(in oklab, var(--error) 10%, var(--panel));
-      border-color: color-mix(in oklab, var(--error) 30%, transparent);
+      background: color-mix(in oklab, var(--error) 8%, var(--panel));
+      border-color: color-mix(in oklab, var(--error) 25%, transparent);
       color: var(--error);
     }
 
     /* done summary */
     .msg-done .msg-bubble {
-      background: color-mix(in oklab, var(--success) 10%, var(--panel));
-      border-color: color-mix(in oklab, var(--success) 30%, transparent);
+      background: color-mix(in oklab, var(--success) 8%, var(--panel));
+      border-color: color-mix(in oklab, var(--success) 25%, transparent);
     }
     .done-header { font-weight: 700; color: var(--success); margin-bottom: 6px; }
 
@@ -195,13 +220,13 @@
     .md ul,.md ol { margin: 4px 0 4px 18px; }
     .md li { margin: 2px 0; }
     .md code { font-family: ui-monospace,'SF Mono',Menlo,monospace; font-size: 0.88em; background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
-    .md pre { background: var(--panel2); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 6px 0; }
+    .md pre { background: var(--panel2); border-radius: 10px; padding: 10px 14px; overflow-x: auto; margin: 6px 0; }
     .md pre code { background: none; padding: 0; }
     .md strong { font-weight: 700; }
     .md em { font-style: italic; }
     .md a { color: var(--accent); }
     .md hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
-    .md blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding-left: 10px; color: var(--muted); }
+    .md blockquote { border-left: 3px solid color-mix(in oklab, var(--accent) 40%, transparent); margin: 4px 0; padding-left: 10px; color: var(--muted); }
     .msg-bubble.md { white-space: normal; }
 
     /* token usage bar */
@@ -224,13 +249,15 @@
       text-decoration: underline;
       margin-top: 4px;
       user-select: none;
+      opacity: .8;
     }
+    .tool-toggle:hover { opacity: 1; }
     .tool-detail { display: none; margin-top: 6px; }
     .tool-detail.open { display: block; }
     .tool-args {
       background: var(--panel2);
       border-radius: 8px;
-      padding: 8px;
+      padding: 8px 10px;
       font-size: 11px;
       color: var(--muted);
       overflow-x: auto;
@@ -239,10 +266,13 @@
 
     /* ── Input bar ── */
     .input-bar {
-      padding: 12px 16px;
       border-top: 1px solid var(--border);
       background: var(--panel);
       flex-shrink: 0;
+    }
+    .input-bar .inner {
+      padding-top: 12px;
+      padding-bottom: 16px;
     }
     .input-row {
       display: flex;
@@ -251,55 +281,61 @@
     }
     textarea#prompt-input {
       flex: 1;
-      padding: 10px 14px;
-      border-radius: 14px;
+      padding: 11px 16px;
+      border-radius: var(--radius);
       border: 1px solid var(--border);
       background: var(--bg);
       color: canvasText;
       font-size: 14px;
       font-family: inherit;
       resize: none;
-      min-height: 42px;
+      min-height: 44px;
       max-height: 160px;
       outline: none;
       line-height: 1.5;
+      transition: border-color .15s, box-shadow .15s;
     }
     textarea#prompt-input:focus {
-      border-color: color-mix(in oklab, var(--accent) 60%, transparent);
-      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 15%, transparent);
+      border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent);
     }
+    textarea#prompt-input::placeholder { color: var(--muted); }
     .btn-send {
-      width: 42px; height: 42px;
-      border-radius: 12px;
+      width: 44px; height: 44px;
+      border-radius: 14px;
       border: none;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      background: linear-gradient(140deg, var(--accent), var(--accent2));
       color: #fff;
       cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
-      transition: opacity .15s, transform .1s;
+      transition: opacity .15s, transform .1s, box-shadow .15s;
+      box-shadow: 0 2px 8px color-mix(in oklab, var(--accent) 35%, transparent);
     }
-    .btn-send:active { transform: scale(.95); }
-    .btn-send:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-send:hover { box-shadow: 0 4px 14px color-mix(in oklab, var(--accent) 45%, transparent); }
+    .btn-send:active { transform: scale(.93); }
+    .btn-send:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
     .btn-abort {
-      padding: 0 16px; height: 42px;
-      border-radius: 12px;
-      border: 1px solid color-mix(in oklab, var(--error) 40%, transparent);
-      background: color-mix(in oklab, var(--error) 12%, transparent);
+      padding: 0 16px; height: 44px;
+      border-radius: 14px;
+      border: 1px solid color-mix(in oklab, var(--error) 35%, transparent);
+      background: color-mix(in oklab, var(--error) 10%, transparent);
       color: var(--error);
       font-size: 13px; font-weight: 600;
       cursor: pointer;
       display: none;
       align-items: center; gap: 6px;
       flex-shrink: 0;
+      transition: background .15s;
     }
+    .btn-abort:hover { background: color-mix(in oklab, var(--error) 16%, transparent); }
     .btn-abort.visible { display: flex; }
 
     /* scroll to bottom fab */
     .fab-bottom {
       position: fixed;
-      bottom: 80px; right: 20px;
-      width: 36px; height: 36px;
+      bottom: 80px; right: 22px;
+      width: 34px; height: 34px;
       border-radius: 50%;
       border: 1px solid var(--border);
       background: var(--panel);
@@ -307,9 +343,11 @@
       cursor: pointer;
       display: none;
       align-items: center; justify-content: center;
-      font-size: 18px;
+      font-size: 16px;
       color: var(--muted);
+      transition: opacity .15s;
     }
+    .fab-bottom:hover { color: canvasText; }
     .fab-bottom.visible { display: flex; }
   </style>
 </head>
@@ -317,20 +355,25 @@
 
 <!-- Top bar -->
 <div class="topbar">
-  <div class="topbar-logo"><img src="icons/icon48.png" alt="" /></div>
-  <div class="topbar-title" id="chat-title">Browser Agent</div>
-  <div class="topbar-meta" id="chat-meta"></div>
-  <div id="status-pill" class="status-pill" style="display:none"></div>
+  <div class="inner">
+    <div class="topbar-logo"><img src="icons/icon48.png" alt="" /></div>
+    <div class="topbar-title" id="chat-title">Browser Agent</div>
+    <div class="topbar-meta" id="chat-meta"></div>
+    <div id="status-pill" class="status-pill" style="display:none"></div>
+  </div>
 </div>
 
 <!-- Messages -->
 <div class="messages" id="messages">
-  <div class="msg-empty" id="empty-state">
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-      <path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z"/>
-      <path d="M12 8v4l3 3"/>
-    </svg>
-    <div>Enter a prompt below to start the agent</div>
+  <div class="messages-inner" id="messages-inner">
+    <div class="msg-empty" id="empty-state">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z"/>
+        <path d="M12 8v4l3 3"/>
+      </svg>
+      <div class="msg-empty-label">Browser Agent</div>
+      <div class="msg-empty-hint">Enter a prompt below to start</div>
+    </div>
   </div>
 </div>
 
@@ -339,12 +382,14 @@
 
 <!-- Input bar -->
 <div class="input-bar">
-  <div class="input-row">
-    <textarea id="prompt-input" placeholder="What should the agent do?" rows="1"></textarea>
-    <button class="btn-abort" id="btn-abort">■ Stop</button>
-    <button class="btn-send" id="btn-send" title="Run agent (Enter)">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-    </button>
+  <div class="inner">
+    <div class="input-row">
+      <textarea id="prompt-input" placeholder="What should the agent do?" rows="1"></textarea>
+      <button class="btn-abort" id="btn-abort">■ Stop</button>
+      <button class="btn-send" id="btn-send" title="Run agent (Enter)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
   </div>
 </div>
 

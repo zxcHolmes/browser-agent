@@ -1,0 +1,50 @@
+# Binaries
+browser-agent-proxy/browser-agent-proxy
+browser-agent-proxy/*.exe
+
+# Go build cache
+*.test
+*.out
+
+# Dependency vendor (we use go modules)
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Env / secrets
+.env
+cli/.env
+**/.env.local
+**/.env.*.local
+
+# Logs
+*.log
+cli/agent.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Chrome Extension — packed artifacts
+*.crx
+*.pem
+chrome-extension/icons/*.png.tmp

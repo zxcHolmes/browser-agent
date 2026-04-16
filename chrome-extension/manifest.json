@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Agent",
+  "version": "2.0.0",
+  "description": "AI-powered browser automation agent. Run scheduled tasks, scrape data, and automate workflows directly in Chrome.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["debugger", "tabs", "activeTab", "storage", "alarms", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": {
+    "default_title": "Browser Agent",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

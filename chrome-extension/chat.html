@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Browser Agent — Chat</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent:   #7c3aed;
+      --accent2:  #4f46e5;
+      --bg:       canvas;
+      --panel:    color-mix(in oklab, canvas 93%, canvasText 7%);
+      --panel2:   color-mix(in oklab, canvas 87%, canvasText 13%);
+      --border:   color-mix(in oklab, canvasText 12%, transparent);
+      --muted:    color-mix(in oklab, canvasText 52%, transparent);
+      --success:  #16a34a;
+      --error:    #dc2626;
+      --warning:  #d97706;
+      --shadow:   0 2px 12px color-mix(in oklab, canvasText 8%, transparent);
+      font-family: ui-rounded, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: var(--bg);
+      color: canvasText;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      flex-shrink: 0;
+      min-height: 52px;
+    }
+    .topbar-logo { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+    .topbar-logo img { width: 100%; height: 100%; }
+    .topbar-title { font-size: 14px; font-weight: 600; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .topbar-meta { font-size: 12px; color: var(--muted); flex-shrink: 0; }
+
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+      flex-shrink: 0;
+    }
+    .pill-running { background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent); }
+    .pill-done    { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); }
+    .pill-error   { background: color-mix(in oklab, var(--error) 15%, transparent); color: var(--error); }
+    .pill-aborted { background: color-mix(in oklab, var(--warning) 15%, transparent); color: var(--warning); }
+    .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ── Message list ── */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scroll-behavior: smooth;
+    }
+
+    /* empty state */
+    .msg-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 14px;
+      gap: 8px;
+      text-align: center;
+    }
+    .msg-empty svg { opacity: .4; }
+
+    /* message bubbles */
+    .msg {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-width: 100%;
+    }
+    .msg-role {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      padding: 0 4px;
+    }
+    .msg-bubble {
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+      word-break: break-word;
+      white-space: pre-wrap;
+      border: 1px solid var(--border);
+    }
+
+    /* user prompt */
+    .msg-user .msg-bubble {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      border-color: transparent;
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-user { align-items: flex-end; }
+    .msg-user .msg-role { color: color-mix(in oklab, var(--accent) 80%, canvasText 20%); }
+
+    /* assistant reply */
+    .msg-assistant .msg-bubble {
+      background: var(--panel);
+      border-bottom-left-radius: 4px;
+    }
+    .msg-assistant { align-items: flex-start; }
+
+    /* tool call */
+    .msg-tool_call .msg-bubble {
+      background: color-mix(in oklab, var(--accent) 8%, var(--panel2));
+      border-color: color-mix(in oklab, var(--accent) 25%, transparent);
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 12px;
+    }
+    .msg-tool_call .tool-name {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* tool result */
+    .msg-tool_result .msg-bubble {
+      background: color-mix(in oklab, var(--success) 8%, var(--panel2));
+      border-color: color-mix(in oklab, var(--success) 20%, transparent);
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      font-size: 12px;
+      color: color-mix(in oklab, canvasText 75%, transparent);
+    }
+    .result-label { font-weight: 700; color: var(--success); }
+
+    /* screenshot */
+    .msg-screenshot .msg-bubble {
+      padding: 6px;
+      background: var(--panel2);
+    }
+    .msg-screenshot img {
+      max-width: 100%;
+      border-radius: 10px;
+      display: block;
+    }
+
+    /* system / meta */
+    .msg-meta {
+      align-self: center;
+      font-size: 11px;
+      color: var(--muted);
+      padding: 2px 12px;
+      background: var(--panel2);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+
+    /* error */
+    .msg-error .msg-bubble {
+      background: color-mix(in oklab, var(--error) 10%, var(--panel));
+      border-color: color-mix(in oklab, var(--error) 30%, transparent);
+      color: var(--error);
+    }
+
+    /* done summary */
+    .msg-done .msg-bubble {
+      background: color-mix(in oklab, var(--success) 10%, var(--panel));
+      border-color: color-mix(in oklab, var(--success) 30%, transparent);
+    }
+    .done-header { font-weight: 700; color: var(--success); margin-bottom: 6px; }
+
+    /* markdown rendering inside assistant/done bubbles */
+    .md h1,.md h2,.md h3 { font-weight: 700; margin: 10px 0 4px; line-height: 1.3; }
+    .md h1 { font-size: 1.15em; }
+    .md h2 { font-size: 1.05em; }
+    .md h3 { font-size: 1em; }
+    .md p { margin: 4px 0; }
+    .md ul,.md ol { margin: 4px 0 4px 18px; }
+    .md li { margin: 2px 0; }
+    .md code { font-family: ui-monospace,'SF Mono',Menlo,monospace; font-size: 0.88em; background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+    .md pre { background: var(--panel2); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 6px 0; }
+    .md pre code { background: none; padding: 0; }
+    .md strong { font-weight: 700; }
+    .md em { font-style: italic; }
+    .md a { color: var(--accent); }
+    .md hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+    .md blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding-left: 10px; color: var(--muted); }
+    .msg-bubble.md { white-space: normal; }
+
+    /* token usage bar */
+    .token-bar {
+      align-self: center;
+      font-size: 10px;
+      color: var(--muted);
+      padding: 2px 10px;
+      background: var(--panel2);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      font-family: ui-monospace, monospace;
+    }
+
+    /* collapsible tool details */
+    .tool-toggle {
+      font-size: 11px;
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: 4px;
+      user-select: none;
+    }
+    .tool-detail { display: none; margin-top: 6px; }
+    .tool-detail.open { display: block; }
+    .tool-args {
+      background: var(--panel2);
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 11px;
+      color: var(--muted);
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* ── Input bar ── */
+    .input-bar {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      flex-shrink: 0;
+    }
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    textarea#prompt-input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: canvasText;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      min-height: 42px;
+      max-height: 160px;
+      outline: none;
+      line-height: 1.5;
+    }
+    textarea#prompt-input:focus {
+      border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 15%, transparent);
+    }
+    .btn-send {
+      width: 42px; height: 42px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn-send:active { transform: scale(.95); }
+    .btn-send:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-abort {
+      padding: 0 16px; height: 42px;
+      border-radius: 12px;
+      border: 1px solid color-mix(in oklab, var(--error) 40%, transparent);
+      background: color-mix(in oklab, var(--error) 12%, transparent);
+      color: var(--error);
+      font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      display: none;
+      align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
+    .btn-abort.visible { display: flex; }
+
+    /* scroll to bottom fab */
+    .fab-bottom {
+      position: fixed;
+      bottom: 80px; right: 20px;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      display: none;
+      align-items: center; justify-content: center;
+      font-size: 18px;
+      color: var(--muted);
+    }
+    .fab-bottom.visible { display: flex; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-logo"><img src="icons/icon48.png" alt="" /></div>
+  <div class="topbar-title" id="chat-title">Browser Agent</div>
+  <div class="topbar-meta" id="chat-meta"></div>
+  <div id="status-pill" class="status-pill" style="display:none"></div>
+</div>
+
+<!-- Messages -->
+<div class="messages" id="messages">
+  <div class="msg-empty" id="empty-state">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2z"/>
+      <path d="M12 8v4l3 3"/>
+    </svg>
+    <div>Enter a prompt below to start the agent</div>
+  </div>
+</div>
+
+<!-- Scroll-to-bottom button -->
+<div class="fab-bottom" id="fab-bottom" title="Scroll to bottom">↓</div>
+
+<!-- Input bar -->
+<div class="input-bar">
+  <div class="input-row">
+    <textarea id="prompt-input" placeholder="What should the agent do?" rows="1"></textarea>
+    <button class="btn-abort" id="btn-abort">■ Stop</button>
+    <button class="btn-send" id="btn-send" title="Run agent (Enter)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+</div>
+
+<script type="module" src="chat.js"></script>
+</body>
+</html>

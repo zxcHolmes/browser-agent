@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Browser Agent</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent: #7c3aed;
+      --accent2: #4f46e5;
+      --panel: color-mix(in oklab, canvas 93%, canvasText 7%);
+      --panel2: color-mix(in oklab, canvas 88%, canvasText 12%);
+      --border: color-mix(in oklab, canvasText 14%, transparent);
+      --muted: color-mix(in oklab, canvasText 58%, transparent);
+      --success: #16a34a;
+      --error: #dc2626;
+      --warning: #d97706;
+      --shadow: 0 4px 24px color-mix(in oklab, canvasText 10%, transparent);
+      font-family: ui-rounded, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(800px 400px at 15% -10%, color-mix(in oklab, var(--accent) 18%, transparent), transparent 70%),
+        radial-gradient(600px 300px at 85% 0%, color-mix(in oklab, var(--accent2) 12%, transparent), transparent 70%),
+        canvas;
+      color: canvasText;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    /* Header */
+    header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+    .logo { width: 48px; height: 48px; border-radius: 14px; overflow: hidden; flex-shrink: 0; }
+    .logo img { width: 100%; height: 100%; }
+    .header-text h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+    .header-text p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+
+    /* Tabs nav */
+    .tabs-nav {
+      display: flex; gap: 4px; margin-bottom: 18px;
+      border-bottom: 1px solid var(--border); padding-bottom: 0;
+    }
+    .tab-btn {
+      padding: 8px 16px; border: none; background: none; color: var(--muted);
+      font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent;
+      margin-bottom: -1px; border-radius: 8px 8px 0 0; transition: color .15s;
+    }
+    .tab-btn:hover { color: canvasText; }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Cards */
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 16px; padding: 18px 20px; margin-bottom: 14px;
+      box-shadow: var(--shadow);
+    }
+    .card-title { margin: 0 0 14px; font-size: 14px; font-weight: 600; color: canvasText; }
+    .card-desc { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+
+    /* Form elements */
+    .field { margin-bottom: 14px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 5px; }
+    input[type=text], input[type=number], input[type=password], select, textarea {
+      width: 100%; padding: 9px 12px; border-radius: 10px;
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, canvas 94%, canvasText 6%);
+      color: canvasText; font-size: 14px; outline: none;
+      font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+    }
+    textarea { resize: vertical; min-height: 80px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .row .field { flex: 1; min-width: 140px; margin-bottom: 0; }
+
+    /* Buttons */
+    .btn {
+      padding: 9px 16px; border-radius: 10px; border: none;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity .15s, transform .1s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+    }
+    .btn-secondary {
+      background: var(--panel2); color: canvasText;
+      border: 1px solid var(--border);
+    }
+    .btn-danger { background: color-mix(in oklab, var(--error) 15%, transparent); color: var(--error); border: 1px solid color-mix(in oklab, var(--error) 30%, transparent); }
+    .btn-success { background: color-mix(in oklab, var(--success) 15%, transparent); color: var(--success); border: 1px solid color-mix(in oklab, var(--success) 30%, transparent); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 8px; }
+
+    /* Status badge */
+    .status-line {
+      font-size: 12px; margin-top: 8px; min-height: 18px; display: flex; align-items: center; gap: 6px;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-ok { background: var(--success); }
+    .dot-error { background: var(--error); }
+    .dot-warn { background: var(--warning); }
+    .dot-idle { background: var(--muted); }
+
+    /* Task list */
+    .task-item {
+      background: var(--panel2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 16px; margin-bottom: 10px;
+    }
+    .task-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .task-name { font-weight: 600; font-size: 14px; }
+    .task-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .task-prompt {
+      font-size: 12px; color: var(--muted); margin-top: 6px;
+      white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    }
+    .task-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 6px;
+      font-size: 11px; font-weight: 600;
+    }
+    .badge-enabled { background: color-mix(in oklab, var(--success) 18%, transparent); color: var(--success); }
+    .badge-disabled { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+    .badge-running { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent); }
+
+    /* History */
+    .history-item {
+      border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin-bottom: 8px;
+      background: var(--panel);
+    }
+    .history-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .history-title { font-size: 13px; font-weight: 600; }
+    .history-time { font-size: 11px; color: var(--muted); }
+    .history-result {
+      margin-top: 8px; font-size: 12px; color: var(--muted);
+      white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto;
+    }
+    .history-expand {
+      margin-top: 6px; font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline;
+    }
+    .history-messages { display: none; margin-top: 8px; }
+    .history-messages.open { display: block; }
+    .msg-bubble {
+      padding: 8px 12px; border-radius: 10px; margin-bottom: 6px;
+      font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    }
+    .msg-system { background: color-mix(in oklab, var(--muted) 15%, transparent); color: var(--muted); display: none; }
+    .msg-user { background: color-mix(in oklab, var(--accent) 15%, transparent); color: canvasText; }
+    .msg-assistant { background: var(--panel2); }
+    .msg-tool { background: color-mix(in oklab, var(--success) 12%, transparent); font-family: ui-monospace, monospace; font-size: 11px; }
+
+    /* Misc */
+    .sep { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+    .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 32px 0; }
+    code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+    a { color: var(--accent); }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><img src="icons/icon128.png" alt="Browser Agent" /></div>
+    <div class="header-text">
+      <h1>Browser Agent</h1>
+      <p>AI-powered browser automation — runs directly in Chrome, no server required</p>
+    </div>
+  </header>
+
+  <nav class="tabs-nav">
+    <button class="tab-btn active" data-tab="tasks">Scheduled Tasks</button>
+    <button class="tab-btn" data-tab="history">History</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+  </nav>
+
+  <!-- ── TAB: Scheduled Tasks ───────────────────────────────────────────── -->
+  <div class="tab-panel active" id="tab-tasks">
+
+    <!-- Quick Run -->
+    <div class="card">
+      <div class="card-title">Quick Run</div>
+      <div class="card-desc">Start a new chat session with the agent.</div>
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" id="quick-run-btn">▶ Open Chat</button>
+      </div>
+    </div>
+
+    <!-- Active runs indicator -->
+    <div id="active-runs-card" style="display:none" class="card">
+      <div class="card-title" style="display:flex;align-items:center;gap:8px">
+        <span class="dot dot-warn" style="width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.4s ease-in-out infinite;flex-shrink:0"></span>
+        Active Runs
+      </div>
+      <div id="active-runs-list"></div>
+    </div>
+    <style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}</style>
+
+    <!-- Add task -->
+    <div class="card">
+      <div class="card-title">Add New Task</div>
+      <div class="row">
+        <div class="field" style="flex:2">
+          <label>Task Name</label>
+          <input type="text" id="new-task-name" placeholder="e.g. Fetch Hacker News" />
+        </div>
+        <div class="field" style="flex:1">
+          <label>Interval (minutes, 0 = manual only)</label>
+          <input type="number" id="new-task-interval" value="60" min="0" />
+        </div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Prompt</label>
+        <textarea id="new-task-prompt" rows="4" placeholder="Describe what the agent should do...&#10;&#10;Example: Visit Hacker News, scrape the top 10 story titles and scores, then POST them as JSON to https://my-webhook.com/hn with header Authorization: Bearer mytoken"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary" id="add-task-btn">Add Task</button>
+        <div class="status-line" id="add-task-status"></div>
+      </div>
+    </div>
+
+    <div id="task-list">
+      <div class="empty" id="tasks-empty">No tasks yet. Add one above.</div>
+    </div>
+  </div>
+
+  <!-- ── TAB: History ───────────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-history">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;color:var(--muted)">Last 24 hours of agent runs</div>
+      <button class="btn btn-secondary btn-sm" id="clear-history-btn">Clear History</button>
+    </div>
+    <div id="history-list">
+      <div class="empty" id="history-empty">No history yet.</div>
+    </div>
+  </div>
+
+  <!-- ── TAB: Settings ──────────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-settings">
+    <div class="card">
+      <div class="card-title">LLM Provider</div>
+      <div class="field">
+        <label>Provider</label>
+        <select id="llm-provider">
+          <option value="openrouter">OpenRouter</option>
+          <option value="openai">OpenAI</option>
+          <option value="ollama">Ollama (local)</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:3">
+          <label>API Base URL</label>
+          <input type="text" id="llm-base-url" placeholder="https://openrouter.ai/api/v1" />
+        </div>
+        <div class="field" style="flex:2">
+          <label>Model</label>
+          <input type="text" id="llm-model" placeholder="google/gemini-2.5-flash-preview" />
+        </div>
+      </div>
+      <div class="field">
+        <label>API Key <span style="color:var(--muted)">(leave empty for Ollama)</span></label>
+        <input type="password" id="llm-api-key" placeholder="sk-..." autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Max consecutive tool calls <span style="color:var(--muted)">(0 = unlimited)</span></label>
+        <input type="number" id="llm-max-tool-calls" value="50" min="0" style="width:120px" />
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button class="btn btn-primary" id="save-llm-btn">Save</button>
+        <button class="btn btn-secondary" id="test-llm-btn">Test Connection</button>
+        <div class="status-line" id="llm-status"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Browser Agent Proxy <span style="font-weight:400;color:var(--muted)">(optional)</span></div>
+      <div class="card-desc">Connect to the Go proxy server to allow external applications to control Chrome via REST API.</div>
+      <div class="field" style="margin-top:12px">
+        <label>Proxy Port</label>
+        <div class="row">
+          <div class="field" style="flex:0 0 120px;margin-bottom:0">
+            <input type="number" id="relay-port" value="12345" min="1" max="65535" style="width:120px" />
+          </div>
+          <button class="btn btn-secondary" id="save-relay-btn">Save Port</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button class="btn btn-primary" id="relay-connect-btn">Connect</button>
+        <div class="status-line" id="relay-status"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Tab Management</div>
+      <div class="field">
+        <label>Idle tab timeout (minutes) — applies to both Agent and Proxy tabs</label>
+        <div class="row">
+          <div class="field" style="flex:0 0 120px;margin-bottom:0">
+            <input type="number" id="tab-timeout" value="1" min="1" max="60" style="width:120px" />
+          </div>
+          <button class="btn btn-secondary" id="save-tab-timeout-btn">Save</button>
+        </div>
+      </div>
+      <div class="status-line" id="tab-timeout-status"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">System Prompt</div>
+      <div class="card-desc" style="margin-bottom:12px">Customize the agent's system prompt. Leave empty to use the built-in default.</div>
+      <div class="field">
+        <label>System Prompt</label>
+        <textarea id="system-prompt" rows="14" placeholder="Leave empty to use built-in default…"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <button class="btn btn-primary" id="save-system-prompt-btn">Save</button>
+        <button class="btn btn-secondary" id="reset-system-prompt-btn">Reset to Default</button>
+        <div class="status-line" id="system-prompt-status"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="options.js"></script>
+</body>
+</html>

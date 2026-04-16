@@ -180,7 +180,7 @@ Then in the extension Settings → **Browser Agent Proxy** → set the port and 
 
 ---
 
-## Python CLI Agent (legacy)
+## Python CLI Agent
 
 A command-line agent that drives the LLM loop via the Proxy REST API.
 
@@ -194,6 +194,14 @@ python agent.py --model qwen/qwen3-235b-a22b "Go to example.com and return the p
 Requires the Browser Agent Proxy to be running. The Chrome Extension's built-in chat is the recommended approach for most use cases.
 
 ---
+
+## Skills
+
+browser agent skill for your ai coding agent.
+
+```bash
+npx skills add zxcHolmes/browser-agent
+```
 
 ## Documentation
 

@@ -10,19 +10,19 @@ export const PROVIDERS = {
   openrouter: {
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'google/gemini-2.5-flash-preview',
+    defaultModel: 'anthropic/claude-sonnet-4.6',
     requiresKey: true,
   },
   openai: {
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini',
+    defaultModel: 'gpt-5.4',
     requiresKey: true,
   },
   ollama: {
     label: 'Ollama (local)',
     baseUrl: 'http://localhost:11434/v1',
-    defaultModel: 'gemma3:12b',
+    defaultModel: 'gemma4:26b',
     requiresKey: false,
   },
 }
@@ -32,22 +32,24 @@ export const PROVIDERS = {
  * @returns {Promise<{provider, baseUrl, apiKey, model}>}
  */
 export async function loadLLMConfig() {
-  const data = await chrome.storage.local.get(['llmProvider', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'maxToolCalls'])
+  const data = await chrome.storage.local.get(['llmProvider', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'maxToolCalls', 'llmContextLength'])
   const provider = data.llmProvider || 'openrouter'
   const providerDef = PROVIDERS[provider] || PROVIDERS.openrouter
   const maxToolCalls = data.maxToolCalls !== undefined ? Number(data.maxToolCalls) : 50
+  const contextLength = Number(data.llmContextLength)
   return {
     provider,
     baseUrl: data.llmBaseUrl || providerDef.baseUrl,
     apiKey: data.llmApiKey || '',
     model: data.llmModel || providerDef.defaultModel,
     maxToolCalls: Number.isFinite(maxToolCalls) && maxToolCalls >= 0 ? maxToolCalls : 50,
+    contextLength: Number.isFinite(contextLength) && contextLength > 0 ? contextLength : 128_000,
   }
 }
 
 // ─── Context window management ─────────────────────────────────────────────────
 
-const MAX_TOKENS = 50_000
+const MAX_TOKENS = 128_000
 const CHARS_PER_TOKEN = 2
 const IMAGE_TOKEN_FIXED = 512
 const IMAGE_CHARS_FIXED = IMAGE_TOKEN_FIXED * CHARS_PER_TOKEN

@@ -96,11 +96,12 @@ document.getElementById('quick-run-btn').addEventListener('click', () => {
 
 // ─── Settings tab ──────────────────────────────────────────────────────────────
 
-const providerSelect    = document.getElementById('llm-provider')
-const baseUrlInput      = document.getElementById('llm-base-url')
-const modelInput        = document.getElementById('llm-model')
-const apiKeyInput       = document.getElementById('llm-api-key')
-const maxToolCallsInput = document.getElementById('llm-max-tool-calls')
+const providerSelect       = document.getElementById('llm-provider')
+const baseUrlInput         = document.getElementById('llm-base-url')
+const modelInput           = document.getElementById('llm-model')
+const apiKeyInput          = document.getElementById('llm-api-key')
+const maxToolCallsInput    = document.getElementById('llm-max-tool-calls')
+const contextLengthInput   = document.getElementById('llm-context-length')
 
 providerSelect.addEventListener('change', () => {
   const p = PROVIDERS[providerSelect.value]
@@ -112,22 +113,24 @@ providerSelect.addEventListener('change', () => {
 })
 
 async function loadLLMSettings() {
-  const data = await chrome.storage.local.get(['llmProvider', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'maxToolCalls'])
+  const data = await chrome.storage.local.get(['llmProvider', 'llmBaseUrl', 'llmApiKey', 'llmModel', 'maxToolCalls', 'llmContextLength'])
   providerSelect.value = data.llmProvider || 'openrouter'
   const p = PROVIDERS[providerSelect.value] || PROVIDERS.openrouter
   baseUrlInput.value = data.llmBaseUrl || p.baseUrl
   modelInput.value   = data.llmModel   || p.defaultModel
   apiKeyInput.value  = data.llmApiKey  || ''
-  maxToolCallsInput.value = data.maxToolCalls !== undefined ? data.maxToolCalls : 50
+  maxToolCallsInput.value  = data.maxToolCalls !== undefined ? data.maxToolCalls : 50
+  contextLengthInput.value = data.llmContextLength !== undefined ? data.llmContextLength : 128000
 }
 
 document.getElementById('save-llm-btn').addEventListener('click', async () => {
   await chrome.storage.local.set({
-    llmProvider:  providerSelect.value,
-    llmBaseUrl:   baseUrlInput.value.trim(),
-    llmApiKey:    apiKeyInput.value.trim(),
-    llmModel:     modelInput.value.trim(),
-    maxToolCalls: parseInt(maxToolCallsInput.value, 10) || 0,
+    llmProvider:     providerSelect.value,
+    llmBaseUrl:      baseUrlInput.value.trim(),
+    llmApiKey:       apiKeyInput.value.trim(),
+    llmModel:        modelInput.value.trim(),
+    maxToolCalls:    parseInt(maxToolCallsInput.value, 10) || 0,
+    llmContextLength: parseInt(contextLengthInput.value, 10) || 128000,
   })
   setStatus('llm-status', 'ok', 'Saved')
 })

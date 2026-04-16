@@ -277,6 +277,10 @@
         <label>Max consecutive tool calls <span style="color:var(--muted)">(0 = unlimited)</span></label>
         <input type="number" id="llm-max-tool-calls" value="50" min="0" style="width:120px" />
       </div>
+      <div class="field">
+        <label>Context length <span style="color:var(--muted)">(tokens — default 128000)</span></label>
+        <input type="number" id="llm-context-length" value="128000" min="1000" style="width:140px" />
+      </div>
       <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
         <button class="btn btn-primary" id="save-llm-btn">Save</button>
         <button class="btn btn-secondary" id="test-llm-btn">Test Connection</button>

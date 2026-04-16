@@ -95,7 +95,7 @@ export async function runAgent(prompt, onProgress = null, signal = null, existin
 
       // Trim context
       const before = messages.length
-      const trimmed = trimMessages(messages)
+      const trimmed = trimMessages(messages, config.contextLength)
       messages.splice(0, messages.length, ...trimmed)
       const dropped = before - messages.length
       const tokenEst = estimateTokens(messages)

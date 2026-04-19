@@ -182,6 +182,59 @@ export async function toolSleep({ seconds = 1 } = {}) {
   return { slept_seconds: ms / 1000 }
 }
 
+// ─── Skill Memory tools ────────────────────────────────────────────────────────
+
+const KEY_SKILLS = 'agentSkills'
+
+async function _getSkills() {
+  const data = await chrome.storage.local.get([KEY_SKILLS])
+  return data[KEY_SKILLS] || []
+}
+
+/**
+ * Save (create or update) an automation skill.
+ * Pass `id` to update an existing skill; omit to create a new one.
+ */
+export async function toolSaveSkill({ id, name, site = '', description } = {}) {
+  if (!name)        throw new Error('name is required')
+  if (!description) throw new Error('description is required')
+
+  const skills = await _getSkills()
+  const now = Date.now()
+  const idx = id ? skills.findIndex(s => s.id === id) : -1
+
+  let skill
+  if (idx >= 0) {
+    skill = { ...skills[idx], name, site: site || skills[idx].site, description, updatedAt: now }
+    skills[idx] = skill
+  } else {
+    skill = {
+      id: `skill_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      name, site, description, createdAt: now, updatedAt: now,
+    }
+    skills.push(skill)
+  }
+
+  await chrome.storage.local.set({ [KEY_SKILLS]: skills })
+  console.log(`[AgentTools] Skill saved: ${skill.id} "${skill.name}"`)
+  return { id: skill.id, name: skill.name, site: skill.site, action: idx >= 0 ? 'updated' : 'created' }
+}
+
+/** List all skills — returns id + name + site only (no full description). */
+export async function toolListSkills() {
+  const skills = await _getSkills()
+  return skills.map(s => ({ id: s.id, name: s.name, site: s.site || '', updatedAt: s.updatedAt }))
+}
+
+/** Get full skill details (including description) by id. */
+export async function toolGetSkill({ id } = {}) {
+  if (!id) throw new Error('id is required')
+  const skills = await _getSkills()
+  const skill = skills.find(s => s.id === id)
+  if (!skill) throw new Error(`Skill "${id}" not found`)
+  return skill
+}
+
 /**
  * Arbitrary HTTP fetch tool — runs in the extension background,
  * so it is NOT subject to CORS restrictions.
@@ -223,16 +276,19 @@ export async function toolFetch({ url, method = 'GET', headers = {}, body = null
 // ─── Tool registry ─────────────────────────────────────────────────────────────
 
 export const TOOL_FUNCTIONS = {
-  create_tab:  toolCreateTab,
-  list_tabs:   toolListTabs,
-  get_tab:     toolGetTab,
-  close_tab:   toolCloseTab,
-  navigate:    toolNavigate,
-  eval:        toolEval,
-  screenshot:  toolScreenshot,
-  cdp:         toolCdp,
-  fetch:       toolFetch,
-  sleep:       toolSleep,
+  create_tab:   toolCreateTab,
+  list_tabs:    toolListTabs,
+  get_tab:      toolGetTab,
+  close_tab:    toolCloseTab,
+  navigate:     toolNavigate,
+  eval:         toolEval,
+  screenshot:   toolScreenshot,
+  cdp:          toolCdp,
+  fetch:        toolFetch,
+  sleep:        toolSleep,
+  save_skill:   toolSaveSkill,
+  list_skills:  toolListSkills,
+  get_skill:    toolGetSkill,
 }
 
 export const TOOL_SCHEMAS = [
@@ -381,6 +437,48 @@ export const TOOL_SCHEMAS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'save_skill',
+      description: 'Save an automation skill to persistent memory. Call this after successfully completing a browser automation workflow so the knowledge can be reused in future tasks. Pass the existing skill id to update/fix a skill.',
+      parameters: {
+        type: 'object',
+        required: ['name', 'description'],
+        properties: {
+          id:          { type: 'string', description: 'Existing skill id to update (omit to create a new skill)' },
+          name:        { type: 'string', description: 'Short descriptive name, e.g. "Post a tweet on X" or "Login to GitHub"' },
+          site:        { type: 'string', description: 'Domain this skill applies to, e.g. "twitter.com" (optional but recommended)' },
+          description: { type: 'string', description: 'Step-by-step natural language description of the automation, including key CSS/data-testid selectors, gotchas, and how to verify success.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_skills',
+      description: 'List all saved automation skills (returns id, name, site only — no full description). Call this at the start of a task to find relevant skills, then use get_skill to load the full steps.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_skill',
+      description: 'Get the full description of a saved automation skill by its id. Call this after list_skills identifies a relevant skill.',
+      parameters: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string', description: 'Skill id from list_skills' },
+        },
+      },
+    },
+  },
 ]
 
 export const SYSTEM_PROMPT = `You are a Browser Agent — an AI assistant that automates Chrome directly from within the browser extension. You operate in the background; tabs you open should NOT be activated (active: false) unless explicitly required. Always close tabs when you're done.
@@ -401,6 +499,57 @@ Available tools:
 - cdp: Send any raw Chrome DevTools Protocol command (e.g. Input.insertText to type)
 - fetch: Make any HTTP request without CORS restrictions (POST to webhooks, APIs, etc.)
 - sleep: Wait N seconds (useful for waiting for animations or rate limits)
+- list_skills / get_skill / save_skill: Automation skill memory (see below)
+
+## Skill Memory — reuse learned automations
+
+You have a persistent skill memory. Skills are **per-site, per-operation** — one skill = one workflow on one website (e.g. "post a tweet on x.com", "scrape top stories on news.ycombinator.com"). Never bundle multiple sites into one skill.
+
+### BEFORE starting the task:
+1. Call \`list_skills\` to see all available skills (returns id + name + site).
+2. Identify any skills relevant to the sites you will visit.
+3. Call \`get_skill\` for each relevant skill to load its full steps.
+4. Follow the skill as a guide — but verify selectors still work; pages change.
+
+### IMMEDIATELY AFTER completing each site's workflow (before moving to the next site):
+- Explored a new workflow successfully → \`save_skill\` for that site.
+- Used an existing skill and it still worked fine → no action needed.
+- Used an existing skill but had to fix/adapt steps → \`save_skill\` with the existing id to overwrite it.
+- Pure data read with no UI interaction (e.g. just fetch) → skip.
+
+### Example: task spanning multiple sites
+Task: "Read HN, pick a story, post it to X with commentary"
+→ At task start: list_skills() — review results, load any relevant skills with get_skill()
+→ After scraping HN successfully: save_skill("Scrape top stories from Hacker News", site="news.ycombinator.com", ...)
+→ After posting tweet successfully: save_skill("Post a tweet on X", site="x.com", ...)
+Result: two independent, reusable skills — not one combined skill.
+
+### What makes a good skill description:
+- Numbered step-by-step actions (navigate → find element → interact → verify)
+- Stable selectors: prefer data-testid, aria-label, name/id attributes over fragile class names
+- Gotchas and workarounds (e.g. "React input requires cdp Input.insertText after focus, not innerHTML")
+- How to verify success (e.g. "toast appears with text 'Your post was sent'")
+
+### Example of a well-written skill description:
+\`\`\`
+Skill name: Post a tweet on X
+Site: x.com
+
+Steps:
+1. Navigate to https://x.com/home, wait for page load.
+2. eval: locate the tweet compose box — document.querySelector('[data-testid="tweetTextarea_0"]')
+3. eval: click the compose box to focus it.
+4. cdp Input.insertText: type the tweet content (max 280 chars — verify length before posting).
+5. eval: locate the Post button — document.querySelector('[data-testid="tweetButtonInline"]')
+6. eval: click the Post button.
+7. Verify success: wait ~1s then take a screenshot — a toast saying "Your post was sent" should
+   appear, or the compose box should be cleared.
+
+Gotchas:
+- X is a React SPA — do NOT set text via innerHTML or .value; always use cdp Input.insertText after focusing the element.
+- If a tab is already open on x.com, reuse it and skip navigation.
+- Tweet character limit is 280. URLs are each counted as 23 characters regardless of actual length.
+\`\`\`
 
 ## Standard operating procedure
 

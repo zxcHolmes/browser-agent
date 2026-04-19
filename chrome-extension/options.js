@@ -8,6 +8,7 @@ import { SYSTEM_PROMPT } from './agent/tools.js'
 import {
   getTasks, saveTask, deleteTask, createTaskId,
   getHistory, clearHistory as clearHistoryStore, deleteHistory,
+  getSkills, saveSkill, deleteSkill,
 } from './agent/scheduler.js'
 
 // ─── Tab navigation ────────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
     if (btn.dataset.tab === 'history') renderHistory()
     if (btn.dataset.tab === 'tasks') { renderTasks(); refreshActiveRuns() }
+    if (btn.dataset.tab === 'skills') renderSkills()
   })
 })
 
@@ -318,15 +320,37 @@ async function renderTasks() {
 
     div.innerHTML = `
       <div class="task-header">
-        <div>
+        <div style="flex:1;min-width:0">
           <div class="task-name">${escHtml(task.name)}</div>
           <div class="task-meta">${intervalText}${nextRunText} · ${task.enabled ? '<span class="badge badge-enabled">enabled</span>' : '<span class="badge badge-disabled">disabled</span>'}</div>
           <div class="task-prompt">${escHtml(task.prompt)}</div>
         </div>
         <div class="task-actions">
           <button class="btn btn-success btn-sm run-btn" title="Run now in chat">▶ Run</button>
+          <button class="btn btn-secondary btn-sm edit-btn">Edit</button>
           <button class="btn btn-secondary btn-sm toggle-btn">${task.enabled ? 'Disable' : 'Enable'}</button>
           <button class="btn btn-danger btn-sm delete-btn">Delete</button>
+        </div>
+      </div>
+      <div class="task-edit-form">
+        <div class="row">
+          <div class="field" style="flex:2">
+            <label>Task Name</label>
+            <input type="text" class="edit-name" value="${escHtml(task.name)}" />
+          </div>
+          <div class="field" style="flex:1">
+            <label>Interval (minutes, 0 = manual only)</label>
+            <input type="number" class="edit-interval" value="${task.intervalMinutes}" min="0" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Prompt</label>
+          <textarea class="edit-prompt" rows="4">${escHtml(task.prompt)}</textarea>
+        </div>
+        <div class="task-edit-actions">
+          <button class="btn btn-primary btn-sm save-edit-btn">Save</button>
+          <button class="btn btn-secondary btn-sm cancel-edit-btn">Cancel</button>
+          <span class="edit-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
       </div>
     `
@@ -337,8 +361,41 @@ async function renderTasks() {
     div.querySelector('.toggle-btn').addEventListener('click', () => toggleTask(task))
     div.querySelector('.delete-btn').addEventListener('click', () => deleteTaskItem(task.id))
 
+    const editForm = div.querySelector('.task-edit-form')
+    div.querySelector('.edit-btn').addEventListener('click', () => {
+      const isOpen = editForm.classList.contains('open')
+      editForm.classList.toggle('open', !isOpen)
+      div.querySelector('.edit-btn').textContent = isOpen ? 'Edit' : 'Cancel'
+    })
+    div.querySelector('.cancel-edit-btn').addEventListener('click', () => {
+      editForm.classList.remove('open')
+      div.querySelector('.edit-btn').textContent = 'Edit'
+    })
+    div.querySelector('.save-edit-btn').addEventListener('click', () => saveTaskEdit(task, div))
+
     container.appendChild(div)
   }
+}
+
+async function saveTaskEdit(task, div) {
+  const nameInput     = div.querySelector('.edit-name')
+  const intervalInput = div.querySelector('.edit-interval')
+  const promptInput   = div.querySelector('.edit-prompt')
+  const statusEl      = div.querySelector('.edit-status')
+
+  const name     = nameInput.value.trim()
+  const interval = parseInt(intervalInput.value, 10) || 0
+  const prompt   = promptInput.value.trim()
+
+  if (!name)   { statusEl.textContent = 'Name is required'; statusEl.style.color = 'var(--error)'; return }
+  if (!prompt) { statusEl.textContent = 'Prompt is required'; statusEl.style.color = 'var(--error)'; return }
+
+  const updated = { ...task, name, prompt, intervalMinutes: interval }
+  await saveTask(updated)   // saveTask calls syncAlarm which clears old alarm and re-registers if needed
+
+  statusEl.textContent = 'Saved'
+  statusEl.style.color = 'var(--success)'
+  await renderTasks()
 }
 
 async function toggleTask(task) {
@@ -375,6 +432,120 @@ document.getElementById('add-task-btn').addEventListener('click', async () => {
   document.getElementById('new-task-prompt').value = ''
   setStatus('add-task-status', 'ok', 'Task added')
   renderTasks()
+})
+
+// ─── Skills tab ────────────────────────────────────────────────────────────────
+
+async function renderSkills() {
+  const skills = await getSkills()
+  const container = document.getElementById('skill-list')
+  const empty = document.getElementById('skills-empty')
+
+  container.querySelectorAll('.skill-item').forEach(el => el.remove())
+
+  if (skills.length === 0) {
+    empty.style.display = ''
+    return
+  }
+  empty.style.display = 'none'
+
+  // Most recently updated first
+  const sorted = [...skills].sort((a, b) => b.updatedAt - a.updatedAt)
+
+  for (const skill of sorted) {
+    const div = document.createElement('div')
+    div.className = 'skill-item'
+
+    div.innerHTML = `
+      <div class="skill-header">
+        <div style="flex:1;min-width:0">
+          <div class="skill-name">${escHtml(skill.name)}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-secondary btn-sm skill-edit-btn">Edit</button>
+          <button class="btn btn-danger btn-sm delete-skill-btn" title="Delete skill">✕</button>
+        </div>
+      </div>
+      <div class="skill-expand" data-expanded="false">Show description</div>
+      <div class="skill-desc" style="display:none">${escHtml(skill.description)}</div>
+      <div class="task-edit-form skill-edit-form">
+        <div class="row">
+          <div class="field" style="flex:2">
+            <label>Skill Name</label>
+            <input type="text" class="skill-edit-name" value="${escHtml(skill.name)}" />
+          </div>
+          <div class="field" style="flex:1">
+            <label>Site (domain)</label>
+            <input type="text" class="skill-edit-site" value="${escHtml(skill.site || '')}" placeholder="e.g. twitter.com" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Description</label>
+          <textarea class="skill-edit-desc" rows="8">${escHtml(skill.description)}</textarea>
+        </div>
+        <div class="task-edit-actions">
+          <button class="btn btn-primary btn-sm skill-save-btn">Save</button>
+          <button class="btn btn-secondary btn-sm skill-cancel-btn">Cancel</button>
+          <span class="skill-edit-status" style="font-size:12px"></span>
+        </div>
+      </div>
+    `
+
+    // Expand/collapse description
+    div.querySelector('.skill-expand').addEventListener('click', function() {
+      const descEl = div.querySelector('.skill-desc')
+      const expanded = this.dataset.expanded === 'true'
+      descEl.style.display = expanded ? 'none' : 'block'
+      this.dataset.expanded = String(!expanded)
+      this.textContent = expanded ? 'Show description' : 'Hide description'
+    })
+
+    // Delete
+    div.querySelector('.delete-skill-btn').addEventListener('click', async () => {
+      if (!confirm(`Delete skill "${skill.name}"?`)) return
+      await deleteSkill(skill.id)
+      div.remove()
+      if (!container.querySelector('.skill-item')) {
+        empty.style.display = ''
+      }
+    })
+
+    // Edit toggle
+    const editForm = div.querySelector('.skill-edit-form')
+    div.querySelector('.skill-edit-btn').addEventListener('click', () => {
+      const isOpen = editForm.classList.contains('open')
+      editForm.classList.toggle('open', !isOpen)
+      div.querySelector('.skill-edit-btn').textContent = isOpen ? 'Edit' : 'Cancel'
+    })
+    div.querySelector('.skill-cancel-btn').addEventListener('click', () => {
+      editForm.classList.remove('open')
+      div.querySelector('.skill-edit-btn').textContent = 'Edit'
+    })
+
+    // Save edits
+    div.querySelector('.skill-save-btn').addEventListener('click', async () => {
+      const name = div.querySelector('.skill-edit-name').value.trim()
+      const site = div.querySelector('.skill-edit-site').value.trim()
+      const description = div.querySelector('.skill-edit-desc').value.trim()
+      const statusEl = div.querySelector('.skill-edit-status')
+
+      if (!name)        { statusEl.textContent = 'Name is required'; statusEl.style.color = 'var(--error)'; return }
+      if (!description) { statusEl.textContent = 'Description is required'; statusEl.style.color = 'var(--error)'; return }
+
+      await saveSkill({ id: skill.id, name, site, description })
+      statusEl.textContent = 'Saved'
+      statusEl.style.color = 'var(--success)'
+      await renderSkills()
+    })
+
+    container.appendChild(div)
+  }
+}
+
+document.getElementById('clear-skills-btn').addEventListener('click', async () => {
+  if (!confirm('Delete all saved skills?')) return
+  await chrome.storage.local.set({ agentSkills: [] })
+  renderSkills()
 })
 
 // ─── History tab ───────────────────────────────────────────────────────────────

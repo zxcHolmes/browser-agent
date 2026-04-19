@@ -148,3 +148,51 @@ export async function deleteHistory(id) {
 export function createRunId() {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
+
+// ─── Skill Memory ──────────────────────────────────────────────────────────────
+// Skill schema:
+// {
+//   id: string,
+//   name: string,          // short human-readable name, e.g. "发表推文"
+//   site: string,          // optional domain hint, e.g. "twitter.com"
+//   description: string,   // natural-language step-by-step description + key selectors
+//   createdAt: number,
+//   updatedAt: number,
+// }
+
+const KEY_SKILLS = 'agentSkills'
+
+export async function getSkills() {
+  const data = await chrome.storage.local.get([KEY_SKILLS])
+  return data[KEY_SKILLS] || []
+}
+
+/**
+ * Save or update a skill (upsert by id).
+ * If id is omitted or not found, a new skill is created.
+ */
+export async function saveSkill({ id, name, site = '', description }) {
+  const skills = await getSkills()
+  const now = Date.now()
+  const idx = id ? skills.findIndex(s => s.id === id) : -1
+
+  if (idx >= 0) {
+    skills[idx] = { ...skills[idx], name, site, description, updatedAt: now }
+  } else {
+    const newId = `skill_${now}_${Math.random().toString(36).slice(2, 8)}`
+    skills.push({ id: newId, name, site, description, createdAt: now, updatedAt: now })
+  }
+
+  await chrome.storage.local.set({ [KEY_SKILLS]: skills })
+  return idx >= 0 ? skills[idx] : skills[skills.length - 1]
+}
+
+export async function deleteSkill(skillId) {
+  const skills = await getSkills()
+  await chrome.storage.local.set({ [KEY_SKILLS]: skills.filter(s => s.id !== skillId) })
+}
+
+export async function getSkillById(skillId) {
+  const skills = await getSkills()
+  return skills.find(s => s.id === skillId) || null
+}

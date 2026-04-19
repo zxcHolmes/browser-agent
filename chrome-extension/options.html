@@ -126,6 +126,13 @@
       display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
     }
     .task-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .task-edit-form {
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+      display: none;
+    }
+    .task-edit-form.open { display: block; }
+    .task-edit-form .row { margin-bottom: 10px; }
+    .task-edit-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
     .badge {
       display: inline-block; padding: 2px 8px; border-radius: 6px;
       font-size: 11px; font-weight: 600;
@@ -160,6 +167,20 @@
     .msg-assistant { background: var(--panel2); }
     .msg-tool { background: color-mix(in oklab, var(--success) 12%, transparent); font-family: ui-monospace, monospace; font-size: 11px; }
 
+    /* Skill items */
+    .skill-item {
+      border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; margin-bottom: 8px;
+      background: var(--panel);
+    }
+    .skill-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .skill-name { font-size: 13px; font-weight: 600; }
+    .skill-site { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .skill-desc {
+      margin-top: 8px; font-size: 12px; color: var(--muted);
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .skill-expand { margin-top: 6px; font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+
     /* Misc */
     .sep { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
     .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 32px 0; }
@@ -182,6 +203,7 @@
   <nav class="tabs-nav">
     <button class="tab-btn active" data-tab="tasks">Scheduled Tasks</button>
     <button class="tab-btn" data-tab="history">History</button>
+    <button class="tab-btn" data-tab="skills">Skills</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
   </nav>
 
@@ -232,6 +254,17 @@
 
     <div id="task-list">
       <div class="empty" id="tasks-empty">No tasks yet. Add one above.</div>
+    </div>
+  </div>
+
+  <!-- ── TAB: Skills ────────────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-skills">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;color:var(--muted)">Automation skills learned by the agent</div>
+      <button class="btn btn-danger btn-sm" id="clear-skills-btn">Clear All</button>
+    </div>
+    <div id="skill-list">
+      <div class="empty" id="skills-empty">No skills yet. The agent will save skills automatically after completing tasks.</div>
     </div>
   </div>
 

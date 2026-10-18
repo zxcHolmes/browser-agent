@@ -34,6 +34,8 @@ export async function withManagedTab(tabId, fn, signal) {
       signal?.throwIfAborted()
       if (tab.dialog && method!=='Page.handleJavaScriptDialog') throw new Error(`JAVASCRIPT_DIALOG_OPEN: ${JSON.stringify(tab.dialog)}; use handle_dialog`)
       tab.lastActivity = Date.now()
+      // The caller asked to leave this page; a "leave site?" prompt is accepted (background.js).
+      if (method==='Page.navigate' && !sessionId) tab.leavingAt = Date.now()
       let poll
       const command=chrome.debugger.sendCommand(
         { tabId: id, ...(sessionId ? { sessionId } : {}) }, method, params)
@@ -183,7 +185,7 @@ function pageOperation(op, args) {
       const range = doc.createRange();range.selectNodeContents(e)
       const selection = win.getSelection();selection.removeAllRanges();selection.addRange(range)
     } else { try { e.select() } catch { throw new Error('INPUT_TYPE_REQUIRES_SPECIALIZED_FILL') } }
-    return {ref:ref(e)}
+    return {ref:ref(e),rich:e.isContentEditable}
   }
   if (op === 'focus') { e.focus();return {ref:ref(e)} }
   if (op === 'prepare_click') {
@@ -288,11 +290,26 @@ export async function browserAction(action, args = {}, signal) {
       if (!target?.objectId) throw new Error('File input could not be resolved')
       let result
       try {
+        // Upload widgets often remove/replace the input, or reset its value, in
+        // their change handler. Record the selection when the event fires — from a
+        // window capture listener, which runs before any page handler — and
+        // inspect the original retained node rather than resolving it again.
+        await send('Runtime.callFunctionOn',{objectId:target.objectId,functionDeclaration:`function(){
+          const input=this, win=this.ownerDocument.defaultView
+          input.__browserAgentSelection=null
+          const record=e=>{ if (e.target!==input || input.__browserAgentSelection) return
+            input.__browserAgentSelection=Array.from(input.files || [], f=>({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified})) }
+          for (const type of ['input','change']) win.addEventListener(type,record,{capture:true})
+          input.__browserAgentForget=()=>{ for (const type of ['input','change']) win.removeEventListener(type,record,{capture:true}) }
+        }`},sessionId)
         await send('DOM.setFileInputFiles',{objectId:target.objectId,files:args.files},sessionId)
-        // Upload widgets often remove/replace the input in their change handler.
-        // Inspect the original retained node, rather than resolving its selector again.
         const selected=await send('Runtime.callFunctionOn',{objectId:target.objectId,
-          functionDeclaration:'function(){return {files:Array.from(this.files || [], f=>({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified}))}}',
+          functionDeclaration:`function(){
+            const now=Array.from(this.files || [], f=>({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified}))
+            const atEvent=this.__browserAgentSelection
+            try { this.__browserAgentForget?.() } finally { delete this.__browserAgentForget; delete this.__browserAgentSelection }
+            return {files: now.length ? now : (atEvent || []), reset_by_page: !now.length && !!atEvent?.length}
+          }`,
           returnByValue:true},sessionId)
         if (selected.exceptionDetails) throw new Error('FILE_SELECTION_UNVERIFIED')
         result=selected.result?.value
@@ -324,13 +341,30 @@ export async function browserAction(action, args = {}, signal) {
     if (action === 'fill') {
       if (typeof args.value !== 'string') throw new Error('value must be a string')
       const prepared=await evaluate('prepare_fill')
-      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8},sessionId)
-      await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8},sessionId)
-      if (args.value) await send('Input.insertText',{text:args.value},sessionId)
-      const result=await evaluate('value',{target:{ref:prepared.ref}})
       // Rich editors (YouTube's description box) render multi-line text with a
       // trailing newline of their own; it is not part of the value.
       const normalize=s=>String(s).replace(/\r\n/g,'\n').replace(/\n+$/,'')
+      const backspace=async()=>{
+        await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8},sessionId)
+        await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8},sessionId)
+      }
+      await backspace()
+      if (prepared.rich) {
+        // Editor frameworks (Draft.js, ProseMirror, Lexical…) keep their own
+        // selection model and ignore a DOM range; a trusted select-all keystroke
+        // is handled by the editor itself. Verify it is empty before typing.
+        for (let attempt=0; attempt<3; attempt++) {
+          if (!normalize((await evaluate('value',{target:{ref:prepared.ref}})).value)) break
+          const modifiers=/Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '') ? 4 : 2
+          await send('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers,commands:['selectAll']},sessionId)
+          await send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers},sessionId)
+          await backspace()
+        }
+        const left=(await evaluate('value',{target:{ref:prepared.ref}})).value
+        if (normalize(left)) throw new Error(`FILL_CLEAR_FAILED: ${JSON.stringify({value:String(left).slice(0,200)})}`)
+      }
+      if (args.value) await send('Input.insertText',{text:args.value},sessionId)
+      const result=await evaluate('value',{target:{ref:prepared.ref}})
       if (result.value !== '[redacted]' && normalize(result.value)!==normalize(args.value)) throw new Error(`FILL_VERIFICATION_FAILED: ${JSON.stringify(result)}`)
       return {filled:true,...result}
     }

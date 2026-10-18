@@ -7,9 +7,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cli.common.automation import AutomationError, TaskState, FileLock, claim_upload
+from cli.common.automation import AutomationError, TaskState, FileLock
 from cli.common.browser_client import APIError, TransportError
-from cli.youtube.main import YouTubeWorkflow, parser_for_cli, prepare_upload, main, same_text
+from cli.youtube.main import YouTubeWorkflow, parser_for_cli, prepare_upload, main, same_text, claim_upload, load_state
 
 CHANNEL='UC'+'0'*22
 
@@ -42,7 +42,7 @@ class WorkflowTests(unittest.TestCase):
         w=self.workflow();w.client.action.side_effect=TransportError('lost reply')
         self.assert_code('ACTION_OUTCOME_UNKNOWN',lambda:w.mutate('publish','click',target='#done'))
         self.assertEqual(w.client.action.call_count,1)
-        self.assertEqual(TaskState.load(self.state.path).data['last_action']['outcome'],'pending')
+        self.assertEqual(load_state(self.state.path).data['last_action']['outcome'],'pending')
 
     def test_video_id_mismatch(self):
         self.state.save(video_id='oldVideo001')
@@ -75,7 +75,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_lost_tab_without_id_never_reuploads(self):
         self.state.save(upload_intent=True,tab_id=123)
-        w=self.workflow();w.client.capabilities.return_value={'implementationRevision':6,'actions':['upload_files','fill','click','snapshot','set_tab_policy']}
+        w=self.workflow();w.client.capabilities.return_value={'implementationRevision':7,'actions':['upload_files','fill','click','snapshot','set_tab_policy']}
         w.client.tab.side_effect=APIError(404,'TAB_NOT_FOUND','gone')
         self.assert_code('UPLOAD_OUTCOME_UNKNOWN',lambda:w.attach(True))
         w.client.create_tab.assert_not_called()

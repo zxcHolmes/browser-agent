@@ -2,7 +2,7 @@
 
 Control normal Chrome through a local Go server and the Browser Agent extension.
 No remote-debugging launch flags are required. This reference describes protocol
-2 and extension 2.1.2 (implementation revision 6).
+2 and extension 2.1.4 (implementation revision 8).
 
 Base URL: `http://127.0.0.1:12345`.
 
@@ -29,7 +29,7 @@ Check the **loaded** capabilities instead of inferring them from files on disk:
   "success": true,
   "data": {
     "protocolVersion": 2,
-    "implementationRevision": 6,
+    "implementationRevision": 8,
     "navigationTracking": true,
     "managedTabsOnly": true,
     "defaultIdleTimeoutMinutes": 30,
@@ -158,12 +158,12 @@ without the raw CDP `result` wrapper.
 |---|---|---|
 | `snapshot` | Optional `limit` (default 200, max 500) | URL/title, up to 12,000 chars of body text and interactive elements |
 | `click` | `target` | Scroll, check visibility/enabled/occlusion, dispatch browser mouse input; returns `clicked:true`, `ref` |
-| `fill` | `target`, string `value` | Replace input/textarea/contenteditable through input events and verify value; returns `filled:true`, `value` |
+| `fill` | `target`, string `value` | Replace input/textarea/contenteditable through input events and verify value; rich editors (Draft.js, ProseMirror, Lexical) are cleared with a trusted select-all first, and a trailing editor newline is ignored. Returns `filled:true`, `value` |
 | `press` | `key`, optional `target` | Focus target and dispatch a key, e.g. Enter, Tab, Escape, ArrowDown, Control+a, Meta+a |
 | `select_option` | `target`, string array `values` | Native select values; dispatch input/change, return selected `values` |
 | `set_checked` | `target`, boolean `checked` | Set/verify native checkbox or radio; a radio cannot be unchecked directly |
 | `wait_for` | `target`, `state`, optional `value`, `timeout_seconds` | Wait for a condition; returns `matched:true`, `observation` |
-| `upload_files` | `target`, array `files` | Select absolute local paths in a file input; returns `stage:"selected"`, `files`, `note` |
+| `upload_files` | `target`, array `files` | Select absolute local paths in a file input; the selection is verified as of the change event, so it holds even when the page removes or resets the input. Returns `stage:"selected"`, `files`, `reset_by_page`, `note` |
 | `set_tab_policy` | Optional `auto_close`, `idle_timeout_minutes` | Set tab lifetime; returns `tabId`, `autoClose`, `idleTimeoutMinutes` |
 | `list_frames` | Optional `session_id` | Frame tree, execution `contexts`, child `sessions` |
 | `handle_dialog` | Boolean `accept`, optional `prompt_text`, `session_id` | Accept/dismiss JavaScript alert/confirm/prompt; returns `handled:true` |
@@ -293,7 +293,10 @@ snake_case `session_id`. `/eval` has no frame parameters.
 If an interaction reports `JAVASCRIPT_DIALOG_OPEN`, its triggering click may
 already have happened. `snapshot` exposes the dialog while it is open. Call
 `handle_dialog` with the appropriate decision; it bypasses the tab action queue
-to unblock the triggering command. This handles JavaScript dialogs, not OS file
+to unblock the triggering command. One exception is handled by the extension
+itself: a "leave site?" (`beforeunload`) prompt raised while the API is closing
+the tab or navigating it (`/navigate`, `Page.navigate`) is accepted, since the
+caller asked to leave the page. This handles JavaScript dialogs, not OS file
 pickers, CAPTCHAs or arbitrary browser permission prompts.
 
 ## Navigation, screenshot and evaluation shortcuts
@@ -463,4 +466,4 @@ Go-request and client-read deadlines.
 
 ## Platform workflow CLIs
 
-[cli/youtube/README.md](cli/youtube/README.md) documents `cli/youtube`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client and workflow modules are in [cli/common](cli/common/README.md).
+[cli/twitter/README.md](cli/twitter/README.md) documents `cli/twitter`: posts on X with text, up to four images, a GIF or a video, a recent-posts listing and duplicate checks, and resumable jobs that never press Post twice. [cli/youtube/README.md](cli/youtube/README.md) documents `cli/youtube`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client and workflow modules are in [cli/common](cli/common/README.md).

@@ -1,26 +1,26 @@
 # Shared CLI modules
 
-Platform-neutral building blocks for site workflow CLIs such as [`cli/youtube`](../youtube/README.md). Python 3.8+, standard library only (`ffmpeg` is needed only by the image helpers, and only when a conversion is required).
+Platform-neutral building blocks for site workflow CLIs such as [`cli/youtube`](../youtube/README.md) and [`cli/twitter`](../twitter/README.md). Python 3.8+, standard library only (`ffmpeg` is needed only by the image helpers, and only when a conversion is required).
 
 | Module | What it provides |
 |---|---|
-| `browser_client.py` | Proxy API client: managed-tab lifecycle, CDP, the semantic actions (`action`, `wait_for`), screenshots; `APIError` (the server answered) vs. `TransportError` (no trustworthy reply — a mutation may already have happened). `load_probe(path)` wraps the DOM helpers and a platform probe into one evaluation. |
-| `automation.py` | `AutomationError` (code + exit code + details), `TaskState` (private, atomically written job state with intent/confirmed actions), `FileLock` (cross-process), `claim_upload` (SHA-256 + target de-duplication index). |
+| `browser_client.py` | Proxy API client: managed-tab lifecycle, CDP, the semantic actions (`action`, `wait_for`), screenshots; `APIError` (the server answered; `not_performed` is true when the extension refused before any input reached the page, e.g. `ELEMENT_OBSCURED`) vs. `TransportError` (no trustworthy reply — a mutation may already have happened). `load_probe(path)` wraps the DOM helpers and a platform probe into one evaluation. |
+| `automation.py` | `AutomationError` (code + exit code + details), `TaskState` (private, atomically written job state with intent/confirmed actions; `TaskState.load(path, platform=…, validate=…)` checks the generic shape and lets the platform check its own fields), `FileLock` (cross-process), `claim_key` (a local index that records which job sent a given content key — e.g. content hash + destination — so the same content is not sent twice). |
 | `media.py` | `read_text` (UTF-8 files), `fingerprint` (SHA-256; a file changing while read is rejected), `download_video` (direct-URL download; `reject_hosts` refuses player pages), `extract_frame` (one video frame), `prepare_image` (fit an image to a site's format/size limits). |
-| `page_workflow.py` | `PageWorkflow`, the base class of a workflow over one managed tab; `same_text` (ignores the trailing newline rich editors add); `MemoryState` (in-memory state for one-shot commands with nothing to resume). |
-| `assets/dom_helpers.js` | `visible`, `clean`, `label`, `first`, `control`, `locate` — available to every probe. |
+| `page_workflow.py` | `PageWorkflow`, the base class of a workflow over one managed tab (`ensure_tab` checks the extension's capabilities and revision, reuses the job's own tab or opens one, and refuses a tab owned by another job); `same_text` (ignores the trailing newline rich editors add); `MemoryState` (in-memory state for one-shot commands with nothing to resume). |
+| `assets/dom_helpers.js` | `visible`, `clean`, `label`, `first`, `control`, `locate`, `openPopup` (the open listbox/menu an input controls through `aria-controls`/`aria-owns`, such as an autocomplete list) — available to every probe. |
 
 ## How a workflow is put together
 
 A platform supplies two things:
 
 - **A probe** (`cli/<platform>/probe.js`): one read-only JavaScript expression that returns the page state as data — flags such as `loginRequired`, field values, and an `actions` map of controls, each `{target, enabled, stable, name}` built with `control(element)`. It never clicks or types.
-- **A workflow class** derived from `PageWorkflow`, which reads the page only through `probe()` / `poll()` and changes it only through `mutate()` / `click()`.
+- **A workflow class** derived from `PageWorkflow`, which opens its tab with `ensure_tab()`, reads the page only through `probe()` / `poll()` and changes it only through `mutate()` / `click()`.
 
 `PageWorkflow` gives every platform the same safety rules:
 
 - Probes are polled and retried freely; a page that is mid-navigation reads as `PAGE_NOT_READY` and is polled again.
-- Every mutation is recorded as an intent before it is sent and marked confirmed after. A mutation whose reply is lost raises `ACTION_OUTCOME_UNKNOWN` and is **never replayed** — the caller inspects the site (a draft, a content list) and reconciles instead.
+- Every mutation is recorded as an intent before it is sent and marked confirmed after. A mutation whose reply is lost raises `ACTION_OUTCOME_UNKNOWN` and is **never replayed** — the caller inspects the site (a draft, a content list) and reconciles instead. One the extension refused before acting (target missing, ambiguous, covered, disabled…) raises `ACTION_NOT_PERFORMED` (exit 4): it is known not to have happened, so the workflow may withdraw its intent and a resume may try again.
 - Subclasses implement `guard(probe)` for states that must stop the run (login wall, captcha, rejection) and `observe(probe)` for facts to record (such as the item ID).
 - `diagnostics()` saves a screenshot and the last observation next to the job state on failure.
 
@@ -28,11 +28,11 @@ A platform supplies two things:
 
 `locate(element, scopes)` returns a CSS selector that the extension resolves again right before acting; the extension requires exactly one visible match, so a stale or ambiguous selector fails instead of acting on the wrong element. Selectors are built from what the site itself keeps stable, language-neutral anchors first:
 
-1. the element's own semantic `id` or `name`;
-2. the same, or the tag, scoped by a stable ancestor — an id, a semantic class name, or a scope the probe passes in (a dialog tag, a row keyed by a business ID);
+1. the element's own test id (`data-testid`, `data-test`, `data-qa`, `data-cy`, `data-e2e`), semantic `id` or `name`;
+2. the same, or the tag, scoped by a stable ancestor — a test id, an id, a semantic class name, or a scope the probe passes in (a dialog, a row keyed by a business ID);
 3. `aria-label`, which follows the UI language, last.
 
-Generated ids (`goog_1420216748`, anything with long digit runs or hashes) and hashed or state class names (`css-1x2y3z`, `…-active`) are never used. When nothing stable is unique, `locate` falls back to a positional path and reports `stable: false`, so a probe author can see where the page offers no good anchor.
+Generated values (`goog_1420216748`, `15865878-follow`, anything with long digit runs or hashes) and hashed or state class names (`css-1x2y3z`, `…-active`) are never used. When nothing stable is unique, `locate` falls back to a positional path and reports `stable: false`, so a probe author can see where the page offers no good anchor.
 
 ## Adding a platform
 

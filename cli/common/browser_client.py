@@ -1,6 +1,7 @@
 """Dependency-free client for Browser Agent Proxy's managed browser API."""
 
 import json
+import re
 from http.client import HTTPException
 import socket
 from pathlib import Path
@@ -22,10 +23,32 @@ def load_probe(path):
     return f'(() => {{\n{helpers}\nreturn {probe};\n}})()'
 
 
+# Extension action errors raised while locating or preparing the target, before
+# any input reaches the page: the action certainly did not happen.
+NOT_PERFORMED_ERRORS = (
+    'TARGET_REQUIRED', 'ELEMENT_NOT_FOUND', 'AMBIGUOUS_TARGET', 'STALE_ELEMENT', 'ELEMENT_NOT_VISIBLE',
+    'ELEMENT_DISABLED', 'ELEMENT_OBSCURED', 'ELEMENT_READONLY', 'NOT_TEXT_EDITABLE',
+    'INPUT_TYPE_REQUIRES_SPECIALIZED_FILL', 'NOT_CHECKABLE_INPUT', 'CANNOT_UNCHECK_RADIO', 'NOT_FILE_INPUT',
+    'INPUT_DOES_NOT_ALLOW_MULTIPLE_FILES', 'NOT_SELECT_ELEMENT', 'SELECT_DOES_NOT_ALLOW_MULTIPLE',
+    'OPTION_NOT_AVAILABLE', 'OPTION_VALUES_REQUIRED', 'FRAME_NOT_FOUND', 'CROSS_ORIGIN_FRAME')
+
+
 class APIError(RuntimeError):
     def __init__(self, status, code, message):
         super().__init__(f"HTTP {status} {code}: {message}")
         self.status, self.code = status, code
+        self.reason = None
+        if status == 422 and code == 'BROWSER_ACTION_FAILED':
+            found = re.search(r'\b(' + '|'.join(NOT_PERFORMED_ERRORS) + r')\b', str(message))
+            if found:
+                self.reason = found.group(1)
+            elif 'JAVASCRIPT_DIALOG_OPEN' in str(message) and 'may already have executed' not in str(message):
+                self.reason = 'JAVASCRIPT_DIALOG_OPEN'
+
+    @property
+    def not_performed(self):
+        """True when the extension refused before acting (see NOT_PERFORMED_ERRORS)."""
+        return self.reason is not None
 
 
 class TransportError(RuntimeError):

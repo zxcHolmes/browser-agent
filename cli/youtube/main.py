@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 import uuid
 
 from ..common.browser_client import APIError, BASE, BrowserClient, TransportError, load_probe
-from ..common.automation import AutomationError, FileLock, TaskState, claim_upload
+from ..common.automation import AutomationError, FileLock, TaskState, claim_key
 from ..common import media
 from ..common.media import fingerprint, log, read_text
 from ..common.page_workflow import PageWorkflow, MemoryState, same_text
@@ -47,6 +47,37 @@ YOUTUBE_HOSTS = ('youtube.com', 'youtu.be')
 def download_video(url, directory, **options):
     return media.download_video(url, directory, reject_hosts=YOUTUBE_HOSTS,
                                 user_agent='Browser-Agent-YouTube-CLI/1.0', **options)
+
+
+def validate_state(data):
+    config = data['config']
+    required = ['title', 'description', 'mode', 'visibility', 'state_dir', 'upload_timeout', 'processing_timeout']
+    if any(k not in config for k in required) or config['mode'] not in {'draft', 'publish'} or config['visibility'] not in {'public', 'unlisted', 'private'}:
+        raise AutomationError('INVALID_STATE', 'Missing or invalid task configuration', exit_code=2)
+    for key in ['upload_timeout', 'processing_timeout']:
+        if not isinstance(config[key], (int, float)) or not 0 < config[key] < float('inf'):
+            raise AutomationError('INVALID_STATE', f'Invalid {key}', exit_code=2)
+    if any(not isinstance(config[k], str) for k in ['title', 'description', 'state_dir']) or config.get('audience') not in {None, 'made-for-kids', 'not-made-for-kids'}:
+        raise AutomationError('INVALID_STATE', 'Invalid metadata or audience', exit_code=2)
+    video = data.get('video')
+    if (not isinstance(video, dict) or not isinstance(video.get('path'), str) or
+            not isinstance(video.get('size'), int) or video['size'] <= 0 or
+            not isinstance(video.get('mtime_ns'), int) or
+            not isinstance(video.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', video['sha256'])):
+        raise AutomationError('INVALID_STATE', 'Invalid source video fingerprint', exit_code=2)
+    if data.get('video_id') and not re.fullmatch(r'[A-Za-z0-9_-]{11}', str(data['video_id'])):
+        raise AutomationError('INVALID_STATE', 'Invalid video ID', exit_code=2)
+
+
+def load_state(path):
+    return TaskState.load(path, platform='youtube', validate=validate_state)
+
+
+def claim_upload(state, registry_directory, *, allow_duplicate=False):
+    """Claim this video for this channel before the file is chosen."""
+    claim_key(state, registry_directory, state.data['video']['sha256'] + ':' + state.data['channel_id'],
+              allow_duplicate=allow_duplicate)
+    state.save(upload_intent=True)
 
 
 def validate_text(title, description):
@@ -93,31 +124,11 @@ class YouTubeWorkflow(PageWorkflow):
                 self.state.save(video_id=ids[0], video_url=f'https://youtu.be/{ids[0]}')
 
     def attach(self, recovering):
-        try:
-            caps = self.client.capabilities()
-        except (APIError, TransportError) as error:
-            raise AutomationError('API_UNAVAILABLE', f'无法连接 Go/插件：{error}', exit_code=3) from error
-        required = {'upload_files', 'fill', 'click', 'snapshot', 'set_tab_policy'}
-        if not required.issubset(caps.get('actions', [])) or caps.get('implementationRevision', 0) < 6:
-            raise AutomationError('EXTENSION_TOO_OLD', '插件缺少高级动作，请更新并刷新 Browser Agent', exit_code=3)
-        if self.tab_id:
-            try:
-                tab = self.client.tab(self.tab_id)
-            except APIError as error:
-                if error.status != 404:
-                    raise
-                tab = None
-            if tab and tab.get('meta', {}).get('youtube_job_id') != self.state.data['job_id']:
-                raise AutomationError('TAB_OWNERSHIP_MISMATCH', '标签页不属于此任务，拒绝控制', exit_code=7)
-            if not tab:
-                self.tab_id = None
-        if recovering and self.state.data.get('upload_intent') and not self.state.data.get('video_id') and not self.tab_id:
-            raise AutomationError('UPLOAD_OUTCOME_UNKNOWN', '原标签已丢失且没有视频 ID，无法确认上次是否创建视频。请先人工核验频道内容列表', exit_code=7)
-        if not self.tab_id:
-            tab = self.client.create_tab(auto_close=False, meta={'youtube_job_id': self.state.data['job_id'], 'platform': 'youtube'})
-            self.tab_id = tab['tabId']
-            self.state.save(tab_id=self.tab_id)
-        self.client.action(self.tab_id, 'set_tab_policy', auto_close=False)
+        def refuse_if_upload_unknown():
+            if recovering and self.state.data.get('upload_intent') and not self.state.data.get('video_id'):
+                raise AutomationError('UPLOAD_OUTCOME_UNKNOWN', '原标签已丢失且没有视频 ID，无法确认上次是否创建视频。请先人工核验频道内容列表', exit_code=7)
+        self.ensure_tab(platform='youtube', required_actions={'upload_files', 'fill', 'click', 'snapshot', 'set_tab_policy'},
+                        min_revision=7, owner_key='youtube_job_id', on_lost=refuse_if_upload_unknown)
         if not recovering or not self.state.data.get('upload_intent'):
             url = self.studio + ('/channel/' + self.config['channel_id'] if self.config.get('channel_id') else '/')
             self.client.navigate(self.tab_id, url)
@@ -626,7 +637,7 @@ def prepare_upload(args):
         raise AutomationError('STATE_EXISTS', '状态文件已存在，请使用 resume 或指定新路径', exit_code=2)
     video_path = args.video or download_video(args.video_url, state_path.parent / ('media-' + job_id),
                         max_mb=args.max_download_mb, timeout=args.download_timeout, quiet=args.quiet)
-    video = fingerprint(video_path, args.quiet)
+    video = fingerprint(video_path, args.quiet, code='INVALID_VIDEO')
     thumbnail = prepare_thumbnail(args.thumbnail, args.thumbnail_at, video['path'], state_path.parent / ('media-' + job_id))
     config = {name: getattr(args, name) for name in ['mode', 'audience', 'channel_id', 'upload_timeout',
               'processing_timeout', 'step_timeout', 'poll_interval', 'allow_duplicate', 'wait_checks']}
@@ -653,7 +664,7 @@ def main(argv=None):
         if args.command in {'resume', 'status'}:
             if not args.state_file:
                 raise AutomationError('STATE_REQUIRED', '--state-file 为必填项', exit_code=2)
-            state = TaskState.load(args.state_file)
+            state = load_state(args.state_file)
             if args.command == 'status':
                 result = summarize(state)
                 print(json.dumps(result, ensure_ascii=False, indent=None if args.json else 2))
@@ -663,7 +674,7 @@ def main(argv=None):
         task_lock = FileLock(str(state.path) + '.lock')
         task_lock.__enter__()
         if args.command == 'resume':
-            state = TaskState.load(args.state_file)
+            state = load_state(args.state_file)
         elif state.path.exists():
             raise AutomationError('STATE_EXISTS', '状态文件已存在，请使用 resume', exit_code=2)
         recovering = args.command == 'resume'

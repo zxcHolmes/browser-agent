@@ -122,15 +122,19 @@ async function closeTab(tabId, reason) {
   const tab = managedTabs.get(tabId)
   if (!tab) return
 
-  managedTabs.delete(tabId)
-  persistManagedTabs()
-  await detachDebugger(tabId)
-
+  // Stay attached while removing: a page's "leave site?" (beforeunload) prompt
+  // would otherwise keep the tab open, unmanaged. The close was requested, so
+  // the prompt is accepted in the debugger event handler.
+  tab.leavingAt = Date.now()
+  tab.closing = true
   try {
     await chrome.tabs.remove(tabId)
   } catch (err) {
     console.warn(`[Tab] Remove tab ${tabId} failed:`, err.message)
   }
+  managedTabs.delete(tabId)
+  persistManagedTabs()
+  await detachDebugger(tabId)
 
   console.log(`[Tab] Closed tab ${tabId} reason=${reason}`)
   pushRelayEvent(tabId, 'tab.closed', { tabId, reason })
@@ -175,6 +179,13 @@ function installDebuggerListeners() {
     if (tab) tab.lastActivity = Date.now()
     const sessionId=source.sessionId || ''
     if (method==='Page.javascriptDialogOpening') {
+      // Accept "leave site?" only when the API itself is closing or navigating
+      // this tab; every other dialog is left for the caller (handle_dialog).
+      if (params.type==='beforeunload' && !sessionId && (tab.closing || Date.now()-(tab.leavingAt || 0) < 30000)) {
+        chrome.debugger.sendCommand({tabId},'Page.handleJavaScriptDialog',{accept:true})
+          .catch(err=>console.warn(`[Dialog] Accepting beforeunload on tab ${tabId} failed:`,err.message))
+        return
+      }
       tab.dialog={...params,sessionId}
     } else if(method==='Page.javascriptDialogClosed') {
       tab.dialog=null
@@ -212,7 +223,7 @@ function installDebuggerListeners() {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (!managedTabs.has(tabId)) return
+  if (!managedTabs.has(tabId) || managedTabs.get(tabId).closing) return  // closeTab reports its own close
   managedTabs.delete(tabId)
   persistManagedTabs()
   pushRelayEvent(tabId, 'tab.closed', { tabId, reason: 'user' })
@@ -437,7 +448,7 @@ async function relayDispatch(method, params, signal) {
       return { result }
     }
     case 'browser.capabilities':
-      return {protocolVersion:2,implementationRevision:6,navigationTracking:!!chrome.webNavigation?.onCreatedNavigationTarget,actions:ACTION_NAMES,defaultIdleTimeoutMinutes:TAB_TIMEOUT_MS/60000,managedTabsOnly:true}
+      return {protocolVersion:2,implementationRevision:8,navigationTracking:!!chrome.webNavigation?.onCreatedNavigationTarget,actions:ACTION_NAMES,defaultIdleTimeoutMinutes:TAB_TIMEOUT_MS/60000,managedTabsOnly:true}
     case 'browser.action': {
       const result=await browserAction(params.action,{...(params.args || {}),tab_id:params.tabId},signal)
       persistManagedTabs()

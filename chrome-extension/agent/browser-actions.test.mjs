@@ -123,5 +123,18 @@ test('upload verifies retained input even when change handler removes it',async(
   })
   const result=await browserAction('upload_files',{tab_id:1,target:'#removed-after-change',files:['/tmp/video.mp4']})
   assert.equal(result.stage,'selected')
-  assert.deepEqual(calls,['Runtime.evaluate','DOM.setFileInputFiles','Runtime.callFunctionOn','Runtime.releaseObject'])
+  assert.deepEqual(calls,['Runtime.evaluate','Runtime.callFunctionOn','DOM.setFileInputFiles','Runtime.callFunctionOn','Runtime.releaseObject'])
+})
+
+test('upload uses the selection recorded at the change event when the page resets the input',async()=>{
+  let verify=0
+  setup(async(_target,method)=>{
+    if(method==='Runtime.evaluate')return {result:{objectId:'reset-input'}}
+    if(method==='Runtime.callFunctionOn'&&++verify===2)
+      return {result:{value:{files:[{name:'a.jpg',size:1},{name:'b.jpg',size:2}],reset_by_page:true}}}
+    return {}
+  })
+  const result=await browserAction('upload_files',{tab_id:1,target:'input[type=file]',files:['/tmp/a.jpg','/tmp/b.jpg']})
+  assert.equal(result.files.length,2)
+  assert.equal(result.reset_by_page,true)
 })

@@ -49,6 +49,42 @@ class PageWorkflow:
         self.last_probe = None
         self.last_log = None
 
+    def ensure_tab(self, *, platform, required_actions=(), min_revision=0, owner_key='job_id', on_lost=None):
+        """Check the extension, then reuse this job's tab or open a new one.
+        Returns True when a new tab was opened (any page state from before is gone).
+        A tab recorded in the state but owned by another job is refused; when the
+        recorded tab is gone, on_lost() runs before a new one is opened and may
+        raise to stop (e.g. when the lost page held an unfinished upload)."""
+        try:
+            caps = self.client.capabilities()
+        except (APIError, TransportError) as error:
+            raise AutomationError('API_UNAVAILABLE', f'Cannot reach the proxy/extension: {error}', exit_code=3) from error
+        missing = set(required_actions) - set(caps.get('actions', []))
+        if missing or caps.get('implementationRevision', 0) < min_revision:
+            raise AutomationError('EXTENSION_TOO_OLD', f'The loaded extension is too old (needs implementation revision ≥ {min_revision}'
+                                  + (f", missing {', '.join(sorted(missing))}" if missing else '') + '); update and reload it',
+                                  exit_code=3, details={'loaded_revision': caps.get('implementationRevision')})
+        if self.tab_id:
+            try:
+                tab = self.client.tab(self.tab_id)
+            except APIError as error:
+                if error.status != 404:
+                    raise
+                tab = None
+            if tab and tab.get('meta', {}).get(owner_key) != self.state.data['job_id']:
+                raise AutomationError('TAB_OWNERSHIP_MISMATCH', 'The recorded tab belongs to another task; refusing to control it', exit_code=7)
+            if not tab:
+                self.tab_id = None
+                if on_lost:
+                    on_lost()
+        opened = not self.tab_id
+        if opened:
+            tab = self.client.create_tab(auto_close=False, meta={owner_key: self.state.data['job_id'], 'platform': platform})
+            self.tab_id = tab['tabId']
+            self.state.save(tab_id=self.tab_id)
+        self.client.action(self.tab_id, 'set_tab_policy', auto_close=False)
+        return opened
+
     def phase(self, name, message):
         self.state.save(phase=name, status='running')
         log(f'[{name}] {message}', self.quiet)
@@ -64,10 +100,10 @@ class PageWorkflow:
             probe = self.client.evaluate(self.tab_id, self.probe_script)
         except APIError as error:
             if error.status == 404:
-                raise AutomationError('TAB_LOST', '受管标签已关闭或丢失；已执行的动作不会重放，请使用 resume 核验', exit_code=7) from error
+                raise AutomationError('TAB_LOST', 'The managed tab was closed or lost; performed actions are not replayed — resume to reconcile', exit_code=7) from error
             raise
         if not isinstance(probe, dict):
-            raise AutomationError('PAGE_NOT_READY', '页面正在切换，暂时无法读取页面状态')
+            raise AutomationError('PAGE_NOT_READY', 'The page is navigating; its state cannot be read yet')
         self.last_probe = probe
         self.guard(probe)
         self.observe(probe)
@@ -105,15 +141,24 @@ class PageWorkflow:
         self.state.intent(name)
         try:
             result = self.client.action(self.tab_id, action, **args)
-        except (APIError, TransportError) as error:
-            raise AutomationError('ACTION_OUTCOME_UNKNOWN', f'{name} 未获得可信完成结果：{error}。请检查现有页面后恢复，不要重复操作',
+        except APIError as error:
+            if error.not_performed:
+                # Refused before any input reached the page: known not to have happened.
+                self.state.save(last_action={**(self.state.data.get('last_action') or {}), 'outcome': 'not_performed',
+                                             'reason': error.reason})
+                raise AutomationError('ACTION_NOT_PERFORMED', f'{name} was not performed: {error.reason}', exit_code=4,
+                                      details={'action': name, 'reason': error.reason}) from error
+            raise AutomationError('ACTION_OUTCOME_UNKNOWN', f'{name}: no trustworthy result ({error}). Inspect the page and resume; do not repeat the action',
+                                  exit_code=7, details={'action': name}) from error
+        except TransportError as error:
+            raise AutomationError('ACTION_OUTCOME_UNKNOWN', f'{name}: no trustworthy result ({error}). Inspect the page and resume; do not repeat the action',
                                   exit_code=7, details={'action': name}) from error
         self.state.confirmed()
         return result
 
     def click(self, key, *, timeout=None):
         probe = self.poll(lambda p: p.get('actions', {}).get(key) and p['actions'][key].get('enabled'),
-                          timeout or self.config['step_timeout'], 'CONTROL_UNAVAILABLE', f'找不到可操作的 {key} 控件，界面可能变化或前置步骤未完成')
+                          timeout or self.config['step_timeout'], 'CONTROL_UNAVAILABLE', f'No usable {key} control: the UI may have changed or an earlier step is incomplete')
         return self.mutate('click_' + key, 'click', target=probe['actions'][key]['target'])
 
     def diagnostics(self):

@@ -5,8 +5,9 @@
 //
 // locate(e) returns a CSS selector that the extension's actions resolve again
 // right before acting (they require exactly one visible match). Selectors are
-// built from what the site itself keeps stable — semantic ids, `name`,
-// `aria-label`, scoped by a stable ancestor — never from generated ids such as
+// built from what the site itself keeps stable — test ids (`data-testid` and
+// friends), semantic ids, `name`, `aria-label`, scoped by a stable ancestor —
+// never from generated values such as
 // `goog_1420216748`. A positional fallback is used only when nothing else is
 // unique and is reported as `stable: false`.
 
@@ -25,6 +26,15 @@ const stableId = id => !!id && /^[A-Za-z][\w-]*$/.test(id) && !/\d{3,}/.test(id)
 // framework scope markers or hashed CSS-module names (`css-1x2y3z`, `sc-aBcD`).
 const stableClass = c => /^[A-Za-z][A-Za-z_-]{7,}$/.test(c) && !/^(style-scope|ng-|css-|sc-|jsx-|is-|has-)/i.test(c) &&
   !/(active|selected|focused|hover|open|visible|hidden|disabled|loading|first-?load)/i.test(c);
+// Attributes sites add for their own tests; stable across releases and UI languages.
+const TEST_ATTRS = ['data-testid', 'data-test-id', 'data-test', 'data-qa', 'data-cy', 'data-e2e'];
+const testAttr = e => {
+  for (const name of TEST_ATTRS) {
+    const value = e.getAttribute?.(name);
+    if (value && value.length <= 80 && !/\d{4,}/.test(value) && !/[0-9a-f]{8,}/i.test(value)) return [name, value];
+  }
+  return null;
+};
 const quote = v => '"'+String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
 
 // Exactly `e` among the elements the extension would consider (visible ones,
@@ -40,6 +50,8 @@ const uniqueIn = (selector, e, scope=document) => {
 // language, so it is tried only after stable-ancestor scoping.
 const ownSelectors = e => {
   const tag=e.tagName.toLowerCase(), neutral=[], labelled=[];
+  const test=testAttr(e);
+  if (test) neutral.push(`[${test[0]}=${quote(test[1])}]`, `${tag}[${test[0]}=${quote(test[1])}]`);
   if (stableId(e.id)) neutral.push('#'+CSS.escape(e.id), tag+'#'+CSS.escape(e.id));
   const name=e.getAttribute('name');
   if (name && name.length<=80 && !/\d{5,}/.test(name)) neutral.push(`${tag}[name=${quote(name)}]`);
@@ -52,6 +64,8 @@ const ownSelectors = e => {
 const ancestorScopes = (e, scopes=[]) => {
   const out=[...scopes];
   for (let p=e.parentElement;p && p!==document.documentElement;p=p.parentElement) {
+    const test=testAttr(p);
+    if (test) out.push(`[${test[0]}=${quote(test[1])}]`);
     if (stableId(p.id)) out.push('#'+CSS.escape(p.id));
     for (const c of [...p.classList].filter(stableClass).slice(0,2)) out.push('.'+CSS.escape(c));
   }
@@ -62,6 +76,8 @@ const positional = e => {
   const parts=[];
   while (e && e.nodeType===1 && e!==document.documentElement) {
     if (stableId(e.id)) { parts.unshift('#'+CSS.escape(e.id)); break; }
+    const test=testAttr(e);
+    if (test && document.querySelectorAll(`[${test[0]}=${quote(test[1])}]`).length===1) { parts.unshift(`[${test[0]}=${quote(test[1])}]`); break; }
     const tag=e.tagName.toLowerCase();
     const same=e.parentElement?[...e.parentElement.children].filter(x=>x.tagName===e.tagName):[e];
     parts.unshift(same.length>1?`${tag}:nth-of-type(${same.indexOf(e)+1})`:tag);
@@ -90,5 +106,17 @@ const control = (e, scopes=[]) => {
 };
 const first = (root, selectors) => {
   for (const selector of selectors) { const found=[...root.querySelectorAll(selector)].find(visible); if (found) return found; }
+  return null;
+};
+
+// The popup an input controls (ARIA combobox pattern: aria-controls/aria-owns),
+// if it is open — e.g. an autocomplete list that can cover nearby buttons.
+const openPopup = e => {
+  if (!e) return null;
+  const ids = [e.getAttribute('aria-controls'), e.getAttribute('aria-owns')].filter(Boolean).join(' ').split(/\s+/).filter(Boolean);
+  for (const id of ids) {
+    const popup = document.getElementById(id);
+    if (popup && visible(popup) && /^(listbox|menu|tree|grid)$/.test(popup.getAttribute('role') || 'listbox')) return popup;
+  }
   return null;
 };

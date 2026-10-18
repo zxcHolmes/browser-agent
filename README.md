@@ -26,7 +26,7 @@ Most browser automation tools (Playwright, Puppeteer) launch a **fresh, sterile 
 |---|---|---|
 | **Chrome extension** (`chrome-extension/`) | The core: tab registry, `chrome.debugger` bridge, and a built-in LLM agent with chat, scheduled tasks and history | [chrome-extension/README.md](chrome-extension/README.md) |
 | **Browser Agent Proxy** (`browser-agent-proxy/`, Go, optional) | REST + WebSocket hub so external programs can drive Chrome through the extension | [API.md](API.md) |
-| **Python CLIs** (`cli/`) | `agent.py`, an LLM agent over the proxy API; `youtube/`, YouTube Studio upload/publish without an API key; `common/`, the shared client and workflow modules for site CLIs | [cli/youtube](cli/youtube/README.md), [cli/common](cli/common/README.md) |
+| **Python CLIs** (`cli/`) | `agent.py`, an LLM agent over the proxy API; `youtube/`, YouTube Studio upload/publish; `twitter/`, posts on X with text, images or video; both without API keys; `common/`, the shared client and workflow modules for site CLIs | [cli/youtube](cli/youtube/README.md), [cli/twitter](cli/twitter/README.md), [cli/common](cli/common/README.md) |
 | **Agent skill** (`skills/`) | Instructions that let an AI coding agent use the proxy | [SKILL.md](skills/browser-agent-skill/SKILL.md) |
 
 ## Quick start
@@ -110,9 +110,12 @@ python3 cli/agent.py "Open Hacker News and return the top 5 story titles"
 
 # YouTube upload and publish through Studio's web UI (standard library only)
 python3 -m cli.youtube upload --video video.mp4 --title "Title" --mode draft
+
+# A post on X with text, images or a video (standard library only)
+python3 -m cli.twitter post --text "Hello" --image photo.jpg
 ```
 
-For most interactive use the extension's built-in chat is simpler than `agent.py`. The YouTube CLI's options, recovery model and exit codes are in [cli/youtube/README.md](cli/youtube/README.md); to build a CLI for another site, start from [cli/common/README.md](cli/common/README.md).
+For most interactive use the extension's built-in chat is simpler than `agent.py`. Options, recovery model and exit codes are in [cli/youtube/README.md](cli/youtube/README.md) and [cli/twitter/README.md](cli/twitter/README.md); to build a CLI for another site, start from [cli/common/README.md](cli/common/README.md).
 
 ## Skills
 
@@ -127,6 +130,7 @@ npx skills add zxcHolmes/browser-agent
 - **[chrome-extension/README.md](chrome-extension/README.md)** — extension install, settings, agent tools, permissions
 - **[API.md](API.md)** — proxy REST API reference, semantic actions, errors, runnable examples
 - **[cli/youtube/README.md](cli/youtube/README.md)** — YouTube upload CLI
+- **[cli/twitter/README.md](cli/twitter/README.md)** — X (Twitter) posting CLI
 - **[cli/common/README.md](cli/common/README.md)** — shared modules for site CLIs and how to add a platform
 - **[TESTING.md](TESTING.md)** — test suites and what they cover
 - **[CLAUDE.md](CLAUDE.md)** — architecture and design notes (also linked as `AGENTS.md` for AI coding agents)

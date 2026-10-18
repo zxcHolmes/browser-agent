@@ -5,7 +5,7 @@
 Requirements:
 
 - Python 3.8+, standard library only; `ffmpeg` on `PATH` only when a thumbnail has to be extracted or converted.
-- The proxy running (default `http://127.0.0.1:12345`) and the extension at implementation revision ≥ 6 (extension 2.1.2).
+- The proxy running (default `http://127.0.0.1:12345`) and the extension at implementation revision ≥ 7 (extension 2.1.3).
 - Chrome signed in to an account that can manage the target channel.
 
 Run it from the repository root as a module, or by path from any directory (handy when another tool calls it):

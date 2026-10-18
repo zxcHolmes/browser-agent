@@ -2,7 +2,6 @@
 import contextlib
 import json
 import os
-import re
 from pathlib import Path
 import tempfile
 import time
@@ -76,37 +75,27 @@ class TaskState:
         self.data = data
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, *, platform, validate=None):
+        """Read a job written by this platform's CLI. Generic checks only; pass
+        validate(data) to check the platform's own fields (raise AutomationError)."""
         path = Path(path).expanduser().resolve()
         try:
             data = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError) as error:
             raise AutomationError('INVALID_STATE', f'Cannot read task state: {error}', exit_code=2) from error
-        if not isinstance(data, dict) or data.get('schema_version') != 1 or data.get('platform') != 'youtube':
-            raise AutomationError('INVALID_STATE', 'Unsupported or invalid YouTube state file', exit_code=2)
+        if not isinstance(data, dict) or data.get('schema_version') != 1 or data.get('platform') != platform:
+            raise AutomationError('INVALID_STATE', f'Not a {platform} task state file (or an unsupported version)', exit_code=2)
         for field in ['job_id', 'config', 'phase']:
             if field not in data:
                 raise AutomationError('INVALID_STATE', f'State is missing {field}', exit_code=2)
-        config = data['config']
-        if not isinstance(config, dict) or not isinstance(data['job_id'], str) or not isinstance(data['phase'], str):
+        if not isinstance(data['config'], dict) or not isinstance(data['job_id'], str) or not isinstance(data['phase'], str):
             raise AutomationError('INVALID_STATE', 'Invalid task/config types', exit_code=2)
-        required = ['title','description','mode','visibility','state_dir','upload_timeout','processing_timeout','step_timeout','poll_interval']
-        if any(k not in config for k in required) or config['mode'] not in {'draft','publish'} or config['visibility'] not in {'public','unlisted','private'}:
-            raise AutomationError('INVALID_STATE', 'Missing or invalid task configuration', exit_code=2)
-        for key in ['upload_timeout','processing_timeout','step_timeout','poll_interval']:
-            value = config[key]
-            if not isinstance(value, (int,float)) or not 0 < value < float('inf'):
+        for key in ['step_timeout', 'poll_interval']:
+            value = data['config'].get(key)
+            if not isinstance(value, (int, float)) or not 0 < value < float('inf'):
                 raise AutomationError('INVALID_STATE', f'Invalid {key}', exit_code=2)
-        if any(not isinstance(config[k], str) for k in ['title','description','state_dir']) or config.get('audience') not in {None,'made-for-kids','not-made-for-kids'}:
-            raise AutomationError('INVALID_STATE', 'Invalid metadata or audience', exit_code=2)
-        video = data.get('video')
-        if (not isinstance(video, dict) or not isinstance(video.get('path'), str) or
-            not isinstance(video.get('size'), int) or video['size'] <= 0 or
-            not isinstance(video.get('mtime_ns'), int) or
-            not isinstance(video.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', video['sha256'])):
-            raise AutomationError('INVALID_STATE', 'Invalid source video fingerprint', exit_code=2)
-        if data.get('video_id') and not re.fullmatch(r'[A-Za-z0-9_-]{11}', str(data['video_id'])):
-            raise AutomationError('INVALID_STATE', 'Invalid video ID', exit_code=2)
+        if validate:
+            validate(data)
         return cls(path, data)
 
     def save(self, **changes):
@@ -123,22 +112,22 @@ class TaskState:
         self.save(last_action=action, **changes)
 
 
-def claim_upload(state, registry_directory, *, allow_duplicate=False):
-    """Claim before file selection; never infer that a failed upload was rolled back."""
+def claim_key(state, registry_directory, key, *, allow_duplicate=False, index_name='upload-index'):
+    """Record that this job owns `key` (e.g. content hash + destination account)
+    before the first irreversible step. Another job holding the same key means
+    the same content was already sent there; never infer that it was rolled back."""
     directory = Path(registry_directory)
-    key = state.data['video']['sha256'] + ':' + state.data['channel_id']
-    with FileLock(directory / 'upload-index.lock'):
-        path = directory / 'upload-index.json'
+    with FileLock(directory / f'{index_name}.lock'):
+        path = directory / f'{index_name}.json'
         try:
             index = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
         except (OSError, ValueError) as error:
-            raise AutomationError('INVALID_UPLOAD_INDEX', f'Cannot read duplicate-upload index: {error}') from error
+            raise AutomationError('INVALID_UPLOAD_INDEX', f'Cannot read duplicate index: {error}') from error
         if not isinstance(index, dict):
-            raise AutomationError('INVALID_UPLOAD_INDEX', 'Upload index must be an object')
+            raise AutomationError('INVALID_UPLOAD_INDEX', 'Duplicate index must be an object')
         previous = index.get(key)
         if previous and previous != str(state.path) and not allow_duplicate:
-            raise AutomationError('DUPLICATE_UPLOAD', 'This video already has an upload task for this channel; inspect/resume that task',
+            raise AutomationError('DUPLICATE_UPLOAD', 'The same content already has a task for this destination; inspect or resume that task',
                                   exit_code=7, details={'existing_state_file': previous})
         index[key] = str(state.path)
         atomic_json(path, index)
-        state.save(upload_intent=True)

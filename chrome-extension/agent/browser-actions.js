@@ -9,7 +9,7 @@ export function configureBrowserActions(tabs, attachDebugger) {
   attach = attachDebugger
 }
 
-export const ACTION_NAMES = ['snapshot', 'click', 'fill', 'press', 'select_option',
+export const ACTION_NAMES = ['snapshot', 'click', 'fill', 'insert_text', 'press', 'select_option',
   'set_checked', 'wait_for', 'upload_files', 'set_tab_policy', 'list_frames', 'handle_dialog']
 
 // Serializes mutations on one tab, while different tabs remain independent.
@@ -176,11 +176,16 @@ function pageOperation(op, args) {
     e.dispatchEvent(new win.Event('change',{bubbles:true}))
     return {values:[...e.selectedOptions].map(o=>o.value)}
   }
-  if (op === 'prepare_fill') {
+  if (op === 'prepare_fill' || op === 'prepare_insert') {
     if ((!e.isContentEditable && !['INPUT','TEXTAREA'].includes(e.tagName)) ||
       ['file','checkbox','radio','button','submit','range','color','date','time','datetime-local'].includes(e.type)) throw new Error('NOT_TEXT_EDITABLE')
     if (e.readOnly) throw new Error('ELEMENT_READONLY')
     e.focus()
+    if (op === 'prepare_insert') {
+      // The caret of a rich editor is moved by a trusted keystroke afterwards.
+      if (!e.isContentEditable) { try { e.setSelectionRange(e.value.length,e.value.length) } catch { throw new Error('INPUT_TYPE_REQUIRES_SPECIALIZED_FILL') } }
+      return {ref:ref(e),rich:e.isContentEditable,before:value(e)}
+    }
     if (e.isContentEditable) {
       const range = doc.createRange();range.selectNodeContents(e)
       const selection = win.getSelection();selection.removeAllRanges();selection.addRange(range)
@@ -338,6 +343,21 @@ export async function browserAction(action, args = {}, signal) {
       await send('Input.dispatchKeyEvent',{...params,type:'keyUp'},sessionId)
       return {pressed:args.key}
     }
+    if (action === 'insert_text') {
+      if (typeof args.value !== 'string' || !args.value) throw new Error('value must be a non-empty string')
+      const prepared=await evaluate('prepare_insert')
+      const normalize=s=>String(s).replace(/\r\n/g,'\n').replace(/\n+$/,'')
+      if (prepared.rich) {
+        // Editor frameworks follow trusted caret movement, not a DOM range.
+        await send('Input.dispatchKeyEvent',{type:'keyDown',key:'End',code:'End',windowsVirtualKeyCode:35,commands:['moveToEndOfDocument']},sessionId)
+        await send('Input.dispatchKeyEvent',{type:'keyUp',key:'End',code:'End',windowsVirtualKeyCode:35},sessionId)
+      }
+      await send('Input.insertText',{text:args.value},sessionId)
+      const result=await evaluate('value',{target:{ref:prepared.ref}})
+      if (result.value !== '[redacted]' && !normalize(result.value).endsWith(normalize(args.value)))
+        throw new Error(`INSERT_VERIFICATION_FAILED: ${JSON.stringify({value:String(result.value).slice(-200)})}`)
+      return {inserted:true,...result}
+    }
     if (action === 'fill') {
       if (typeof args.value !== 'string') throw new Error('value must be a string')
       const prepared=await evaluate('prepare_fill')
@@ -392,6 +412,7 @@ const definitions={
   snapshot:['Observe page text and interactive elements, including open Shadow DOM. Returns refs; refresh snapshot after navigation.',[],{limit:{type:'integer'}}],
   click:['Click a unique visible enabled unobscured element through browser mouse input. Verify the resulting page state.',['target'],{}],
   fill:['Replace input, textarea, or contenteditable text through browser input events, then verify the value.',['target','value'],{value:{type:'string'}}],
+  insert_text:['Append text at the end of an input, textarea or contenteditable through browser input events (no clearing), then verify it.',['target','value'],{value:{type:'string'}}],
   press:['Send a key such as Enter, Tab, Escape, Control+a, Meta+a. Optional target receives focus.',['key'],{key:{type:'string'}}],
   select_option:['Select native dropdown option values and emit input/change events.',['target','values'],{values:{type:'array',items:{type:'string'}}}],
   set_checked:['Set a native checkbox/radio checked state and verify it.',['target','checked'],{checked:{type:'boolean'}}],

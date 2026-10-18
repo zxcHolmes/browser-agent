@@ -27,7 +27,7 @@ import uuid
 from ..common.browser_client import APIError, BASE, BrowserClient, TransportError, load_probe
 from ..common.automation import AutomationError, FileLock, TaskState, claim_key
 from ..common.media import fingerprint, log, read_text
-from ..common.page_workflow import PageWorkflow, MemoryState, same_text
+from ..common.page_workflow import PageWorkflow, MemoryState, comparable_text, same_published_text, same_text
 
 PROBE = load_probe(Path(__file__).parent / 'probe.js')
 SITE = 'https://x.com'
@@ -49,21 +49,9 @@ MAX_VIDEO_BYTES = 512 * 1024 * 1024
 # ---------------------------------------------------------------------------
 # Text and media checks (local, before the browser is touched)
 
-URL_RE = re.compile(r'https?://\S+|(?<![\w@#])(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?', re.I)
-
-
-def comparable(text):
-    """Normalised text for duplicate checks. Links are dropped because x.com
-    shows them shortened (t.co / truncated display URLs)."""
-    text = URL_RE.sub(' ', text or '')
-    return ' '.join(text.replace('…', ' ').split()).casefold()
-
-
-def same_post_text(posted, wanted, truncated=False):
-    a, b = comparable(posted), comparable(wanted)
-    if not a or not b:
-        return False
-    return a == b or (truncated and b.startswith(a))
+# Links are dropped because x.com shows them shortened (t.co / truncated URLs).
+comparable = comparable_text
+same_post_text = same_published_text
 
 
 def classify_media(images, video):
@@ -143,7 +131,7 @@ class TwitterWorkflow(PageWorkflow):
     def attach(self):
         self.ensure_tab(platform='twitter', required_actions=REQUIRED_ACTIONS, min_revision=MIN_REVISION)
         self.phase('account', 'Checking sign-in and account')
-        self.client.navigate(self.tab_id, self.site + '/home')
+        self.navigate(self.site + '/home')
         probe = self.poll(lambda p: p.get('loggedIn'), self.config['step_timeout'], 'SITE_NOT_READY',
                           'x.com did not finish loading a signed-in page (network, sign-in or an unsupported UI)')
         handle = probe['handle']
@@ -159,7 +147,7 @@ class TwitterWorkflow(PageWorkflow):
         """The signed-in account's newest posts from its profile (own posts only;
         reposts of others are skipped). Scrolls until `limit` or no more load."""
         handle = self.state.data['account']
-        self.client.navigate(self.tab_id, f'{self.site}/{handle}')
+        self.navigate(f'{self.site}/{handle}')
         try:
             self.poll(lambda p: p['timeline']['ready'] and p['path'].strip('/').lower() == handle.lower(),
                       settle, 'TIMELINE_NOT_READY', '')
@@ -202,7 +190,7 @@ class TwitterWorkflow(PageWorkflow):
 
     def open_composer(self):
         self.phase('compose', 'Opening the post composer')
-        self.client.navigate(self.tab_id, self.site + '/compose/post')
+        self.navigate(self.site + '/compose/post')
         self.poll(lambda p: (p.get('composer') or {}).get('text') and p['composer'].get('fileInput'),
                   self.config['step_timeout'], 'COMPOSER_UNAVAILABLE', 'The post composer did not open')
 

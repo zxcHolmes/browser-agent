@@ -79,7 +79,7 @@ Prompt: Open amazon.com/dp/B0XXXXX, check the current price, and if it's below $
 | `create_tab` / `list_tabs` / `get_tab` / `close_tab` | Manage the agent's own tabs |
 | `navigate` | Go to a URL and wait for the page to load |
 | `snapshot` | Page text and interactive elements (including open shadow DOM) with refs for the actions below |
-| `click` / `fill` / `press` / `select_option` / `set_checked` | Act on a unique element through real browser input, then verify the result |
+| `click` / `fill` / `insert_text` / `press` / `select_option` / `set_checked` | Act on a unique element through real browser input, then verify the result |
 | `wait_for` | Wait for an element, text or value; a timeout is an error |
 | `upload_files` | Choose local files in an `input[type=file]` |
 | `list_frames` / `handle_dialog` / `set_tab_policy` | iframes, JavaScript dialogs, keeping a tab open during long work |

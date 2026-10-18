@@ -17,7 +17,7 @@ type BrowserHandler struct{ hub *relay.Hub }
 func NewBrowserHandler(hub *relay.Hub) *BrowserHandler { return &BrowserHandler{hub: hub} }
 
 var browserActions = map[string]bool{
-	"snapshot": true, "click": true, "fill": true, "press": true,
+	"snapshot": true, "click": true, "fill": true, "insert_text": true, "press": true,
 	"select_option": true, "set_checked": true, "wait_for": true,
 	"upload_files": true, "set_tab_policy": true, "list_frames": true, "handle_dialog": true,
 }

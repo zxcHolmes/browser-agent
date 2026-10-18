@@ -8,6 +8,7 @@ an uncertain outcome is reported instead of being repeated.
 """
 import contextlib
 import os
+import re
 import time
 
 from .automation import AutomationError
@@ -20,6 +21,25 @@ def same_text(a, b):
     # newline of its own; compare values without it.
     norm = lambda v: (v or '').replace('\r\n', '\n').rstrip('\n')
     return norm(a) == norm(b)
+
+
+URL_RE = re.compile(r'https?://\S+|(?<![\w@#])(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?', re.I)
+
+
+def comparable_text(text):
+    """Normalised post text for duplicate checks: links dropped (sites show them
+    shortened), case folded, whitespace collapsed."""
+    text = URL_RE.sub(' ', text or '')
+    return ' '.join(text.replace('…', ' ').split()).casefold()
+
+
+def same_published_text(posted, wanted, truncated=False):
+    """Whether a published text is the wanted one; a text the site cut off
+    ("Show more") matches by prefix."""
+    a, b = comparable_text(posted), comparable_text(wanted)
+    if not a or not b:
+        return False
+    return a == b or (truncated and b.startswith(a))
 
 
 class MemoryState:
@@ -85,6 +105,21 @@ class PageWorkflow:
         self.client.action(self.tab_id, 'set_tab_policy', auto_close=False)
         return opened
 
+    def navigate(self, url, *, attempts=3):
+        """Load a page. Loading is a read, so a network failure is retried; a page
+        that still cannot load stops the run with NAVIGATION_FAILED."""
+        for attempt in range(attempts):
+            try:
+                return self.client.navigate(self.tab_id, url)
+            except APIError as error:
+                if error.code != 'NAVIGATION_FAILED':
+                    raise
+                if attempt == attempts - 1:
+                    raise AutomationError('NAVIGATION_FAILED', f'Could not load {url}: {error} (network or proxy problem?); resume when it is back',
+                                          exit_code=5, details={'url': url}) from error
+                log(f'  loading failed ({error}); retrying', self.quiet)
+                self.sleep(3 * (attempt + 1))
+
     def phase(self, name, message):
         self.state.save(phase=name, status='running')
         log(f'[{name}] {message}', self.quiet)
@@ -137,10 +172,21 @@ class PageWorkflow:
                    'alerts': (self.last_probe or {}).get('alerts', [])}
         raise AutomationError(code, message, exit_code=5, details=details)
 
-    def mutate(self, name, action, **args):
+    # Refusals that usually clear by themselves (an animation, an element being
+    # re-rendered). Retrying them is safe: the action is known not to have run.
+    TRANSIENT_REFUSALS = {'ELEMENT_OBSCURED', 'ELEMENT_NOT_VISIBLE', 'STALE_ELEMENT'}
+
+    def mutate(self, name, action, *, attempts=3, **args):
         self.state.intent(name)
         try:
-            result = self.client.action(self.tab_id, action, **args)
+            for attempt in range(attempts):
+                try:
+                    result = self.client.action(self.tab_id, action, **args)
+                    break
+                except APIError as error:
+                    if not (error.reason in self.TRANSIENT_REFUSALS and attempt < attempts - 1):
+                        raise
+                    self.sleep(1)
         except APIError as error:
             if error.not_performed:
                 # Refused before any input reached the page: known not to have happened.

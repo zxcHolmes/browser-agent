@@ -131,10 +131,10 @@ class YouTubeWorkflow(PageWorkflow):
                         min_revision=7, owner_key='youtube_job_id', on_lost=refuse_if_upload_unknown)
         if not recovering or not self.state.data.get('upload_intent'):
             url = self.studio + ('/channel/' + self.config['channel_id'] if self.config.get('channel_id') else '/')
-            self.client.navigate(self.tab_id, url)
+            self.navigate(url)
         self.phase('studio', '检查登录和目标频道')
         if recovering and self.state.data.get('upload_intent') and not self.current_has_wizard():
-            self.client.navigate(self.tab_id, self.content_url())
+            self.navigate(self.content_url())
         probe = self.poll(lambda p: p.get('channelId') or p.get('wizard'), self.config['step_timeout'],
                           'STUDIO_NOT_READY', 'Studio 未就绪，可能网络失败、登录失效或界面不受支持')
         channel = probe.get('channelId') or self.state.data.get('channel_id')
@@ -149,7 +149,7 @@ class YouTubeWorkflow(PageWorkflow):
         """Newest rows of Studio's content lists (sorted by date, first page only)."""
         rows = []
         for name in lists:
-            self.client.navigate(self.tab_id, self.studio + f"/channel/{self.state.data['channel_id']}/videos/{CONTENT_LISTS[name]}")
+            self.navigate(self.studio + f"/channel/{self.state.data['channel_id']}/videos/{CONTENT_LISTS[name]}")
             try:
                 # Wait for this list's own tab so rows of the previous list are not read.
                 probe = self.poll(lambda p: p.get('contentList') == name and p.get('rows'), settle,
@@ -188,7 +188,7 @@ class YouTubeWorkflow(PageWorkflow):
         return next((r for r in probe.get('rows', []) if video_id in r.get('videoIds', [])), None)
 
     def load_content_row(self):
-        self.client.navigate(self.tab_id, self.content_url())
+        self.navigate(self.content_url())
         try:
             return self.poll(lambda p: self.find_row(p), self.config['step_timeout'],
                              'EXISTING_VIDEO_NOT_FOUND', '当前内容列表没有找到记录的视频 ID')
@@ -303,7 +303,7 @@ class YouTubeWorkflow(PageWorkflow):
         verify after reloading."""
         url = self.studio + f'/video/{video_id}/edit'
         self.phase('edit', f'打开 {video_id} 的编辑页')
-        self.client.navigate(self.tab_id, url)
+        self.navigate(url)
         self.poll(lambda p: p.get('title') and p.get('thumbnail'), self.config['step_timeout'],
                   'EDITOR_UNAVAILABLE', '视频编辑页没有就绪（视频 ID 不属于此频道？）')
         self.phase('thumbnail', '上传缩略图')
@@ -314,7 +314,7 @@ class YouTubeWorkflow(PageWorkflow):
         self.mutate('save_edit', 'click', target=probe['editSave']['target'])
         self.poll(lambda p: p.get('editSave') and not p['editSave']['enabled'] and not p.get('saving'),
                   self.config['step_timeout'], 'SAVE_UNVERIFIED', '点击保存后没有确认保存完成')
-        self.client.navigate(self.tab_id, url)
+        self.navigate(url)
         probe = self.poll(lambda p: p.get('thumbnail'), self.config['step_timeout'],
                           'EDITOR_UNAVAILABLE', '重新载入后编辑页没有就绪')
         if not probe['thumbnail'].get('custom'):

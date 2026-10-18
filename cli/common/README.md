@@ -1,13 +1,13 @@
 # Shared CLI modules
 
-Platform-neutral building blocks for site workflow CLIs such as [`cli/youtube`](../youtube/README.md) and [`cli/twitter`](../twitter/README.md). Python 3.8+, standard library only (`ffmpeg` is needed only by the image helpers, and only when a conversion is required).
+Platform-neutral building blocks for site workflow CLIs such as [`cli/youtube`](../youtube/README.md) and [`cli/twitter`](../twitter/README.md) and [`cli/tiktok`](../tiktok/README.md). Python 3.8+, standard library only (`ffmpeg` is needed only by the image helpers, and only when a conversion is required).
 
 | Module | What it provides |
 |---|---|
 | `browser_client.py` | Proxy API client: managed-tab lifecycle, CDP, the semantic actions (`action`, `wait_for`), screenshots; `APIError` (the server answered; `not_performed` is true when the extension refused before any input reached the page, e.g. `ELEMENT_OBSCURED`) vs. `TransportError` (no trustworthy reply — a mutation may already have happened). `load_probe(path)` wraps the DOM helpers and a platform probe into one evaluation. |
 | `automation.py` | `AutomationError` (code + exit code + details), `TaskState` (private, atomically written job state with intent/confirmed actions; `TaskState.load(path, platform=…, validate=…)` checks the generic shape and lets the platform check its own fields), `FileLock` (cross-process), `claim_key` (a local index that records which job sent a given content key — e.g. content hash + destination — so the same content is not sent twice). |
 | `media.py` | `read_text` (UTF-8 files), `fingerprint` (SHA-256; a file changing while read is rejected), `download_video` (direct-URL download; `reject_hosts` refuses player pages), `extract_frame` (one video frame), `prepare_image` (fit an image to a site's format/size limits). |
-| `page_workflow.py` | `PageWorkflow`, the base class of a workflow over one managed tab (`ensure_tab` checks the extension's capabilities and revision, reuses the job's own tab or opens one, and refuses a tab owned by another job); `same_text` (ignores the trailing newline rich editors add); `MemoryState` (in-memory state for one-shot commands with nothing to resume). |
+| `page_workflow.py` | `PageWorkflow`, the base class of a workflow over one managed tab (`ensure_tab` checks the extension's capabilities and revision, reuses the job's own tab or opens one, and refuses a tab owned by another job); `navigate` (page loads are reads, so a network failure is retried, then `NAVIGATION_FAILED`); `same_text` (ignores the trailing newline rich editors add); `comparable_text` / `same_published_text` (caption/post text for duplicate checks: links dropped, case and spacing ignored, a cut-off text matched by prefix); `MemoryState` (in-memory state for one-shot commands with nothing to resume). |
 | `assets/dom_helpers.js` | `visible`, `clean`, `label`, `first`, `control`, `locate`, `openPopup` (the open listbox/menu an input controls through `aria-controls`/`aria-owns`, such as an autocomplete list) — available to every probe. |
 
 ## How a workflow is put together
@@ -20,7 +20,7 @@ A platform supplies two things:
 `PageWorkflow` gives every platform the same safety rules:
 
 - Probes are polled and retried freely; a page that is mid-navigation reads as `PAGE_NOT_READY` and is polled again.
-- Every mutation is recorded as an intent before it is sent and marked confirmed after. A mutation whose reply is lost raises `ACTION_OUTCOME_UNKNOWN` and is **never replayed** — the caller inspects the site (a draft, a content list) and reconciles instead. One the extension refused before acting (target missing, ambiguous, covered, disabled…) raises `ACTION_NOT_PERFORMED` (exit 4): it is known not to have happened, so the workflow may withdraw its intent and a resume may try again.
+- Every mutation is recorded as an intent before it is sent and marked confirmed after. A mutation whose reply is lost raises `ACTION_OUTCOME_UNKNOWN` and is **never replayed** — the caller inspects the site (a draft, a content list) and reconciles instead. One the extension refused before acting (target missing, ambiguous, covered, disabled…) raises `ACTION_NOT_PERFORMED` (exit 4): it is known not to have happened, so the workflow may withdraw its intent and a resume may try again. Refusals that usually clear by themselves (`ELEMENT_OBSCURED` during an animation, `ELEMENT_NOT_VISIBLE`, `STALE_ELEMENT`) are retried a few times first — safe for the same reason.
 - Subclasses implement `guard(probe)` for states that must stop the run (login wall, captcha, rejection) and `observe(probe)` for facts to record (such as the item ID).
 - `diagnostics()` saves a screenshot and the last observation next to the job state on failure.
 

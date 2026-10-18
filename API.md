@@ -2,7 +2,7 @@
 
 Control normal Chrome through a local Go server and the Browser Agent extension.
 No remote-debugging launch flags are required. This reference describes protocol
-2 and extension 2.1.4 (implementation revision 8).
+2 and extension 2.1.5 (implementation revision 9).
 
 Base URL: `http://127.0.0.1:12345`.
 
@@ -29,11 +29,11 @@ Check the **loaded** capabilities instead of inferring them from files on disk:
   "success": true,
   "data": {
     "protocolVersion": 2,
-    "implementationRevision": 8,
+    "implementationRevision": 9,
     "navigationTracking": true,
     "managedTabsOnly": true,
     "defaultIdleTimeoutMinutes": 30,
-    "actions": ["snapshot", "click", "fill", "press", "select_option", "set_checked", "wait_for", "upload_files", "set_tab_policy", "list_frames", "handle_dialog"]
+    "actions": ["snapshot", "click", "fill", "insert_text", "press", "select_option", "set_checked", "wait_for", "upload_files", "set_tab_policy", "list_frames", "handle_dialog"]
   }
 }
 ```
@@ -159,6 +159,7 @@ without the raw CDP `result` wrapper.
 | `snapshot` | Optional `limit` (default 200, max 500) | URL/title, up to 12,000 chars of body text and interactive elements |
 | `click` | `target` | Scroll, check visibility/enabled/occlusion, dispatch browser mouse input; returns `clicked:true`, `ref` |
 | `fill` | `target`, string `value` | Replace input/textarea/contenteditable through input events and verify value; rich editors (Draft.js, ProseMirror, Lexical) are cleared with a trusted select-all first, and a trailing editor newline is ignored. Returns `filled:true`, `value` |
+| `insert_text` | `target`, non-empty string `value` | Append at the end of an input/textarea/contenteditable without clearing (the caret is moved with a trusted keystroke, so rich editors follow), then verify the field ends with it. Returns `inserted:true`, `value` |
 | `press` | `key`, optional `target` | Focus target and dispatch a key, e.g. Enter, Tab, Escape, ArrowDown, Control+a, Meta+a |
 | `select_option` | `target`, string array `values` | Native select values; dispatch input/change, return selected `values` |
 | `set_checked` | `target`, boolean `checked` | Set/verify native checkbox or radio; a radio cannot be unchecked directly |
@@ -466,4 +467,4 @@ Go-request and client-read deadlines.
 
 ## Platform workflow CLIs
 
-[cli/twitter/README.md](cli/twitter/README.md) documents `cli/twitter`: posts on X with text, up to four images, a GIF or a video, a recent-posts listing and duplicate checks, and resumable jobs that never press Post twice. [cli/youtube/README.md](cli/youtube/README.md) documents `cli/youtube`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client and workflow modules are in [cli/common](cli/common/README.md).
+[cli/tiktok/README.md](cli/tiktok/README.md) documents `cli/tiktok`: TikTok videos posted or saved as drafts through TikTok Studio, with real hashtags, visibility, the AI-generated label, recent posts/drafts and duplicate checks. [cli/twitter/README.md](cli/twitter/README.md) documents `cli/twitter`: posts on X with text, up to four images, a GIF or a video, a recent-posts listing and duplicate checks, and resumable jobs that never press Post twice. [cli/youtube/README.md](cli/youtube/README.md) documents `cli/youtube`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client and workflow modules are in [cli/common](cli/common/README.md).

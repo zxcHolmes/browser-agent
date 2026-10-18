@@ -20,6 +20,7 @@ python3 -m unittest cli.youtube.tests.test_youtube -v
 # X CLI: text comparison, attachment rules, stop conditions, single Post click,
 # rejection/unknown outcomes, resume reconciliation, duplicate check, timeline reading
 python3 -m unittest cli.twitter.tests.test_twitter -v
+python3 -m unittest cli.tiktok.tests.test_tiktok -v
 ```
 
 ## Against the real proxy, extension and Chrome
@@ -49,4 +50,4 @@ After changing the extension, reload it in `chrome://extensions` and check `GET 
 - Upload tests verify file selection and the real HTTP transfer, not large-video processing, scheduled publishing or captchas.
 - Mutating actions are never retried automatically: a timeout or dropped connection can leave the outcome unknown, so inspect the site's state (draft or content list) before retrying.
 - `chrome.storage.session` does not survive a browser restart or an extension reload, so managed tabs are not recovered across either; workflows such as the YouTube CLI recover through their own persisted state instead.
-- Live-site coverage of the site CLIs is described in [cli/youtube/README.md](cli/youtube/README.md#compatibility-and-known-limits) and [cli/twitter/README.md](cli/twitter/README.md#known-limits).
+- Live-site coverage of the site CLIs is described in [cli/youtube/README.md](cli/youtube/README.md#compatibility-and-known-limits) [cli/twitter/README.md](cli/twitter/README.md#known-limits) and [cli/tiktok/README.md](cli/tiktok/README.md#known-limits).

@@ -448,7 +448,7 @@ You MUST reply in the exact same language the user wrote in. This is non-negotia
 
 Available tools:
 - snapshot: Observe actual interactive elements and obtain unique element refs. Prefer this before actions.
-- click / fill / press / select_option / set_checked: Verified browser interactions. Prefer these over ad-hoc eval.
+- click / fill / insert_text / press / select_option / set_checked: Verified browser interactions (insert_text appends at the end without clearing). Prefer these over ad-hoc eval.
 - upload_files: Select files from absolute local paths; returns selected, NOT uploaded. Use wait_for to verify site progress, completion and processing. Never close an uploading/processing tab.
 - wait_for: Wait for explicit element, text, value or URL conditions. A timeout is a failure requiring diagnosis.
 - set_tab_policy: Set auto_close:false during long uploads or manual intervention, restore it after completion.

@@ -18,7 +18,7 @@ cd browser-agent-proxy
 go run .
 ```
 
-The extension reconnects automatically. Query `GET /api/capabilities` to verify the loaded implementation. Protocol 2 exposes the high-level actions; implementation revision 4 adds navigation-source tracking (`navigationTracking:true`, extension 2.1.0 with `webNavigation` permission). Revision 5 (extension 2.1.1) verifies selected files through a retained input node even if the site removes the input. Revision 6 (extension 2.1.2) ignores the trailing newline rich editors add when verifying `fill`. Revision 7 (2.1.3) clears rich editors (Draft.js, ProseMirror, Lexical) with a trusted select-all before `fill`, and verifies `upload_files` even when the page resets the input in its change handler. Revision 8 (2.1.4) accepts a page's "leave site?" prompt when the API itself closes or navigates the tab. If an action is missing, reload the extension instead of assuming the disk version is already running.
+The extension reconnects automatically. Query `GET /api/capabilities` to verify the loaded implementation. Protocol 2 exposes the high-level actions; implementation revision 4 adds navigation-source tracking (`navigationTracking:true`, extension 2.1.0 with `webNavigation` permission). Revision 5 (extension 2.1.1) verifies selected files through a retained input node even if the site removes the input. Revision 6 (extension 2.1.2) ignores the trailing newline rich editors add when verifying `fill`. Revision 7 (2.1.3) clears rich editors (Draft.js, ProseMirror, Lexical) with a trusted select-all before `fill`, and verifies `upload_files` even when the page resets the input in its change handler. Revision 8 (2.1.4) accepts a page's "leave site?" prompt when the API itself closes or navigates the tab. Revision 9 (2.1.5) adds `insert_text`, which appends at the end of a field — for editors that turn typed `#tags` or `@mentions` into entities only as they are typed. If an action is missing, reload the extension instead of assuming the disk version is already running.
 
 API responses use `{success:true,data:{...}}` or `{success:false,error,code}`. `/screenshot` is an exception: it returns image bytes. Check HTTP status and the envelope; preserve error details.
 
@@ -52,6 +52,7 @@ Call `snapshot` to observe text and elements. It returns `ref`, role, accessible
 | `click` | `target`; visible/enabled/unobscured browser mouse click |
 | `fill` | `target`, string `value`; replace input/textarea/contenteditable through browser input, verify value |
 | `press` | `key`, optional `target`; Enter, Tab, Escape, arrows, Meta+a, Control+a |
+| `insert_text` | `target`, string `value`; appends at the end, never clears |
 | `select_option` | `target`, string array `values`; native select |
 | `set_checked` | `target`, boolean `checked`; native checkbox/radio |
 | `wait_for` | `target`, `state`, optional `value`, `timeout_seconds` |
@@ -114,4 +115,4 @@ python3 cli/browser_smoke.py --advanced
 
 The default `local` demo exercises a temporary local form, upload with SHA-256 verification, saved draft reload and a screenshot. `hn` reads Hacker News and fills the submit form only when available; it does not submit. Consult `demo.py --help` for the explicit remote upload example and its completion/lifetime options.
 
-For YouTube upload/draft/publish tasks, use `python3 -m cli.youtube` (or `python3 path/to/cli/youtube` from another directory) and read [its workflow documentation](../../cli/youtube/README.md). For posts on X use `python3 -m cli.twitter` ([documentation](../../cli/twitter/README.md)); run `recent --text` first when publishing in bulk. It reuses the shared API client, persists upload/publish intent, and reconciles uncertain commits. Do not blindly restart an upload after an ambiguous result.
+For YouTube upload/draft/publish tasks, use `python3 -m cli.youtube` (or `python3 path/to/cli/youtube` from another directory) and read [its workflow documentation](../../cli/youtube/README.md). For posts on X use `python3 -m cli.twitter` ([documentation](../../cli/twitter/README.md)); run `recent --text` first when publishing in bulk. For TikTok use `python3 -m cli.tiktok` ([documentation](../../cli/tiktok/README.md)); `--draft` saves instead of posting. It reuses the shared API client, persists upload/publish intent, and reconciles uncertain commits. Do not blindly restart an upload after an ambiguous result.

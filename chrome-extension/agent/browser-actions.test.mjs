@@ -138,3 +138,23 @@ test('upload uses the selection recorded at the change event when the page reset
   assert.equal(result.files.length,2)
   assert.equal(result.reset_by_page,true)
 })
+
+test('insert_text moves a rich editor caret to the end, appends, and never clears',async()=>{
+  const calls=[]
+  let evaluated=0
+  setup(async(_target,method,params)=>{
+    calls.push(method==='Input.dispatchKeyEvent'?`${params.type}:${(params.commands||[]).join()}`:method)
+    if(method==='Runtime.evaluate')return {result:{value:++evaluated===1?{ref:'r1',rich:true,before:'Hi '}:{value:'Hi #tag'}}}
+    return {}
+  })
+  const result=await browserAction('insert_text',{tab_id:1,target:'[contenteditable]',value:'#tag'})
+  assert.equal(result.inserted,true)
+  assert.deepEqual(calls,['Runtime.evaluate','keyDown:moveToEndOfDocument','keyUp:','Input.insertText','Runtime.evaluate'])
+})
+
+test('insert_text reports text that did not land',async()=>{
+  let evaluated=0
+  setup(async(_target,method)=>method==='Runtime.evaluate'
+    ?{result:{value:++evaluated===1?{ref:'r1',rich:false,before:''}:{value:'something else'}}}:{})
+  await assert.rejects(browserAction('insert_text',{tab_id:1,target:'textarea',value:'#tag'}),/INSERT_VERIFICATION_FAILED/)
+})

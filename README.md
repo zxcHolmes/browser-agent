@@ -2,8 +2,6 @@
 
 A Chrome Extension that gives AI agents full control of your everyday Chrome browser — no Puppeteer, no special launch flags, no separate browser instance.
 
-[![Demo Video](https://img.youtube.com/vi/GE09e9LOW1g/maxresdefault.jpg)](https://www.youtube.com/watch?v=GE09e9LOW1g)
-
 ---
 
 ## Why Browser Agent?

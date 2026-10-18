@@ -15,10 +15,7 @@ from urllib.error import URLError
 from urllib.parse import urlparse, unquote
 from urllib.request import Request, urlopen
 
-try:
-    from .automation import AutomationError
-except ImportError:
-    from automation import AutomationError
+from .automation import AutomationError
 
 
 def log(message, quiet=False):

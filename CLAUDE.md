@@ -303,7 +303,8 @@ The extension service worker is single-threaded — all commands execute seriall
 - **[API.md](./API.md)** — Full REST API reference
 - **[CLAUDE.md](./CLAUDE.md)** — This file, architecture notes for AI assistants
 - **[cli/agent.py](./cli/agent.py)** — Legacy Python CLI agent
-- **[cli/YOUTUBE.md](./cli/YOUTUBE.md)** — YouTube upload CLI and the shared CLI modules (`browser_client`, `automation`, `media`, `page_workflow`, `assets/dom_helpers.js`)
+- **[cli/youtube/README.md](./cli/youtube/README.md)** — YouTube upload CLI (`python3 -m cli.youtube`)
+- **[cli/common/README.md](./cli/common/README.md)** — Shared modules for site CLIs (`browser_client`, `automation`, `media`, `page_workflow`, `assets/dom_helpers.js`) and how to add a platform
 - **[TESTING.md](./TESTING.md)** — Test suites and how to run them
 
 ---

@@ -1,6 +1,6 @@
 # YouTube upload CLI
 
-`cli/youtube.py` uploads and publishes videos through YouTube Studio's own web UI, driven by the Browser Agent Proxy (Go) → Chrome extension → your normal Chrome. No YouTube Data API key is needed.
+`cli/youtube` uploads and publishes videos through YouTube Studio's own web UI, driven by the Browser Agent Proxy (Go) → Chrome extension → your normal Chrome. No YouTube Data API key is needed.
 
 Requirements:
 
@@ -8,19 +8,22 @@ Requirements:
 - The proxy running (default `http://127.0.0.1:12345`) and the extension at implementation revision ≥ 6 (extension 2.1.2).
 - Chrome signed in to an account that can manage the target channel.
 
-Run from the repository root:
+Run it from the repository root as a module, or by path from any directory (handy when another tool calls it):
 
 ```bash
-python3 cli/youtube.py --help
-python3 cli/youtube.py upload --help
+python3 -m cli.youtube --help
+python3 -m cli.youtube upload --help
+python3 /path/to/browser-agent/cli/youtube upload --help
 ```
+
+The examples below use the first form.
 
 ## Upload and publish
 
 Upload a local video and keep it as a draft:
 
 ```bash
-python3 cli/youtube.py upload \
+python3 -m cli.youtube upload \
   --video "/path/to/my video.mp4" \
   --title "Video title" \
   --description "Video description" \
@@ -30,7 +33,7 @@ python3 cli/youtube.py upload \
 Upload and publish immediately (the CLI also clicks the final Publish button):
 
 ```bash
-python3 cli/youtube.py upload \
+python3 -m cli.youtube upload \
   --video /path/to/video.mp4 \
   --title-file /path/to/title.txt \
   --description-file /path/to/description.txt \
@@ -47,7 +50,7 @@ python3 cli/youtube.py upload \
 A direct video-file URL is downloaded into the job directory first:
 
 ```bash
-python3 cli/youtube.py upload \
+python3 -m cli.youtube upload \
   --video-url https://example.com/media/video.mp4 \
   --title "Title" --mode draft \
   --max-download-mb 4096 --download-timeout 120
@@ -67,16 +70,16 @@ Without one, YouTube picks a frame itself, which can be an unsuitable one such a
 
 ```bash
 # An image (jpg/png up to 2 MB is uploaded as is; anything else is converted to jpg with ffmpeg)
-python3 cli/youtube.py upload ... --thumbnail /path/cover.png
+python3 -m cli.youtube upload ... --thumbnail /path/cover.png
 # Or a frame of the video at N seconds (needs ffmpeg)
-python3 cli/youtube.py upload ... --thumbnail-at 5
+python3 -m cli.youtube upload ... --thumbnail-at 5
 ```
 
 The thumbnail is chosen after the title and description, and the run continues only once the form shows a custom thumbnail. To replace the thumbnail of a video that is already up:
 
 ```bash
-python3 cli/youtube.py thumbnail --video-id VIDEO_ID --thumbnail /path/cover.png
-python3 cli/youtube.py thumbnail --video-id VIDEO_ID --video video.mp4 --thumbnail-at 5
+python3 -m cli.youtube thumbnail --video-id VIDEO_ID --thumbnail /path/cover.png
+python3 -m cli.youtube thumbnail --video-id VIDEO_ID --video video.mp4 --thumbnail-at 5
 ```
 
 This opens the video's edit page, uploads the image, saves, reloads and checks that a custom thumbnail is still shown. A channel that may not use custom thumbnails (for example, not yet phone-verified) gets `THUMBNAIL_NOT_ALLOWED` (exit 6) and nothing is changed. Desktop Studio offers custom thumbnails for Shorts too. The public channel page may show the new image only after its cache refreshes.
@@ -86,11 +89,11 @@ This opens the video's edit page, uploads the image, saves, reloads and checks t
 ```bash
 # Newest videos and Shorts (first page of each list, newest first):
 # video_id, title, visibility (public/unlisted/private/draft), date
-python3 cli/youtube.py recent --json --quiet
+python3 -m cli.youtube recent --json --quiet
 
 # Is there already a video with this title? (case and extra whitespace ignored, drafts included)
 # See `duplicate` and `title_matches` in the result.
-python3 cli/youtube.py recent --title "Video title" --json --quiet
+python3 -m cli.youtube recent --title "Video title" --json --quiet
 ```
 
 Options: `--list videos|shorts|all` (default `all`), `--limit` per list (default 30), `--channel-id`. The command only reads, writes no state file and closes its own tab.
@@ -105,13 +108,13 @@ State lives in `$XDG_STATE_HOME/browser-agent/youtube` (default `~/.local/state/
 
 ```bash
 # Print the local record only; does not contact the browser or re-check Studio
-python3 cli/youtube.py status --state-file /path/state.json
+python3 -m cli.youtube status --state-file /path/state.json
 
 # Continue after handling a login or verification prompt in the kept tab
-python3 cli/youtube.py resume --state-file /path/state.json
+python3 -m cli.youtube resume --state-file /path/state.json
 
 # Publish a draft the CLI saved and verified
-python3 cli/youtube.py resume \
+python3 -m cli.youtube resume \
   --state-file /path/state.json --mode publish \
   --audience not-made-for-kids --visibility public
 ```
@@ -141,36 +144,24 @@ On failure the job's own tab is always kept, and a screenshot plus the last page
 
 ## How controls are located
 
-The probe (`assets/youtube_probe.js`) is read-only. Each time it reads the page it builds a selector for every control it reports, and the extension resolves that selector again right before acting and requires exactly one visible match — zero or several matches fail rather than act on the wrong element. Selectors use only what the page itself keeps stable, language-neutral anchors first:
+`probe.js` is read-only and reports each control with a selector built by the shared `locate` helper (rules in [cli/common](../common/README.md#locating-controls)); the extension resolves it again right before acting and requires exactly one visible match. On Studio this yields selectors such as `#next-button`, `#done-button`, `input[name="Filedata"]`, `[name=PUBLIC]`, `.ytcpAppHeaderCreateIcon button`, and content-list rows scoped by video ID (`ytcp-video-row:has(img[src*="/vi/<id>/"])`) — no generated ids, and `aria-label` only as a last resort.
 
-1. semantic ids (`#next-button`, `#done-button`, `#ytcp-uploads-dialog-close-button`);
-2. `name` attributes (`input[name="Filedata"]`, radio buttons such as `[name=PUBLIC]`);
-3. a stable ancestor id or semantic class name as scope (`.ytcpAppHeaderCreateIcon button`); content-list rows are scoped by video ID (`ytcp-video-row:has(img[src*="/vi/<id>/"])`);
-4. `aria-label`, which follows the UI language, last.
+## Files
 
-Framework-generated ids (`goog_1420216748` and others with long digit runs or hashes) and hashed class names are never used. Only when nothing stable is unique does the probe fall back to a positional path, and it marks that control `stable: false`.
-
-## Modules
-
-Platform-neutral, for reuse by other platform CLIs:
-
-- `browser_client.py` — proxy API client: managed-tab lifecycle, CDP, high-level actions, transport vs. server errors. `load_probe(name)` wraps the shared DOM helpers and a platform probe into one evaluation. `demo.py` uses it too.
-- `automation.py` — job errors, private atomic state, cross-process locks, media de-duplication.
-- `media.py` — UTF-8 text files, file fingerprints (SHA-256; a file changing while read is rejected), direct-URL downloads (`reject_hosts` refuses player pages), `extract_frame` (one video frame), `prepare_image` (fit an image to a site's format/size limits).
-- `page_workflow.py` — `PageWorkflow` base class: polled, retried read-only probes; mutations recorded as intents and never replayed; clicks by `actions` key; failure screenshots. Subclasses implement `guard()` (conditions that must stop the run, such as a login wall) and `observe()` (facts to record, such as the item ID). Also `same_text` (ignores the trailing newline rich editors add) and `MemoryState` (in-memory state for one-shot commands with nothing to resume).
-- `assets/dom_helpers.js` — `visible`, `clean`, `label`, `first`, `control` and `locate`, shared by probes.
-
-YouTube-specific: `assets/youtube_probe.js` (the DOM adapter) and `youtube.py` (workflow, checkpoints and recovery). A new platform is one `<platform>_probe.js` plus a workflow class derived from `PageWorkflow`.
+- `main.py` — arguments, the `YouTubeWorkflow` (a [`PageWorkflow`](../common/README.md)), checkpoints and recovery.
+- `probe.js` — the read-only DOM adapter for Studio, including the UI strings it recognises.
+- `__main__.py` — entry point for `python3 -m cli.youtube` and `python3 path/to/cli/youtube`.
+- `tests/` — offline unit tests, and a live smoke test against `tests/fixtures/youtube_studio.html`.
 
 ## Tests
 
 ```bash
 # No browser: errors, de-duplication, locks, unknown-publish recovery, thumbnails
-python3 -m unittest cli.tests.test_youtube -v
+python3 -m unittest cli.youtube.tests.test_youtube -v
 
 # Real proxy + extension + Chrome against a temporary localhost mock of Studio;
 # uploads only test bytes to localhost, never to YouTube
-python3 -m cli.tests.youtube_smoke
+python3 -m cli.youtube.tests.youtube_smoke
 ```
 
 ## Compatibility and known limits

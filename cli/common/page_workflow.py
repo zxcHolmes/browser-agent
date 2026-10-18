@@ -1,7 +1,7 @@
 """Probe-driven workflow over one managed browser tab, shared by platform CLIs.
 
-A platform supplies a read-only probe script (assets/<platform>_probe.js, run
-with the shared DOM helpers) that returns the page state, including an
+A platform supplies a read-only probe script (cli/<platform>/probe.js, run
+with the shared DOM helpers via browser_client.load_probe) that returns the page state, including an
 `actions` map of {target, enabled} controls. Probes are polled and retried
 freely; every mutation is recorded as an intent first and never replayed, so
 an uncertain outcome is reported instead of being repeated.
@@ -10,14 +10,9 @@ import contextlib
 import os
 import time
 
-try:
-    from .automation import AutomationError
-    from .browser_client import APIError, TransportError
-    from .media import log
-except ImportError:
-    from automation import AutomationError
-    from browser_client import APIError, TransportError
-    from media import log
+from .automation import AutomationError
+from .browser_client import APIError, TransportError
+from .media import log
 
 
 def same_text(a, b):

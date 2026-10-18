@@ -1,5 +1,5 @@
 """Opt-in real Chrome/Go/plugin integration; only uploads to localhost fixture.
-Run from the repository root: python3 -m cli.tests.youtube_smoke
+Run from the repository root: python3 -m cli.youtube.tests.youtube_smoke
 """
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -7,9 +7,9 @@ from pathlib import Path
 import tempfile
 import threading
 
-from cli.browser_client import BrowserClient, TransportError
-from cli.youtube import YouTubeWorkflow, parser_for_cli, prepare_upload
-from cli.automation import AutomationError
+from cli.common.browser_client import BrowserClient, TransportError
+from cli.youtube.main import YouTubeWorkflow, parser_for_cli, prepare_upload
+from cli.common.automation import AutomationError
 
 HTML=(Path(__file__).parent/'fixtures'/'youtube_studio.html').read_bytes()
 class Handler(BaseHTTPRequestHandler):

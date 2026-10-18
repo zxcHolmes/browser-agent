@@ -1,10 +1,10 @@
 """Upload to YouTube Studio through Browser Agent Proxy (no YouTube API key).
 
-Examples (run from the repository root):
-  python3 cli/youtube.py upload --video /path/video.mp4 --title '标题' --mode draft
-  python3 cli/youtube.py upload --video /path/video.mp4 --title-file title.txt --description-file body.txt --mode publish --audience not-made-for-kids --visibility public
-  python3 cli/youtube.py resume --state-file /path/state.json
-  python3 cli/youtube.py status --state-file /path/state.json
+Examples (from the repository root; from elsewhere use `python3 /path/to/cli/youtube`):
+  python3 -m cli.youtube upload --video /path/video.mp4 --title 'Title' --mode draft
+  python3 -m cli.youtube upload --video /path/video.mp4 --title-file title.txt --description-file body.txt --mode publish --audience not-made-for-kids --visibility public
+  python3 -m cli.youtube resume --state-file /path/state.json
+  python3 -m cli.youtube status --state-file /path/state.json
 
 Progress goes to stderr; one JSON result goes to stdout. A failed upload keeps
 its managed Chrome page open. Mutations are not automatically retried. Direct
@@ -22,20 +22,13 @@ import time
 from urllib.parse import urlparse
 import uuid
 
-try:
-    from .browser_client import APIError, BASE, BrowserClient, TransportError, load_probe
-    from .automation import AutomationError, FileLock, TaskState, claim_upload
-    from . import media
-    from .media import fingerprint, log, read_text
-    from .page_workflow import PageWorkflow, MemoryState, same_text
-except ImportError:
-    from browser_client import APIError, BASE, BrowserClient, TransportError, load_probe
-    from automation import AutomationError, FileLock, TaskState, claim_upload
-    import media
-    from media import fingerprint, log, read_text
-    from page_workflow import PageWorkflow, MemoryState, same_text
+from ..common.browser_client import APIError, BASE, BrowserClient, TransportError, load_probe
+from ..common.automation import AutomationError, FileLock, TaskState, claim_upload
+from ..common import media
+from ..common.media import fingerprint, log, read_text
+from ..common.page_workflow import PageWorkflow, MemoryState, same_text
 
-PROBE = load_probe('youtube_probe.js')
+PROBE = load_probe(Path(__file__).parent / 'probe.js')
 STUDIO = 'https://studio.youtube.com'
 DEFAULT_STATE_DIR = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local' / 'state'))) / 'browser-agent' / 'youtube'
 AUDIENCES = {'made-for-kids': 'yes', 'not-made-for-kids': 'no'}
@@ -467,7 +460,7 @@ def add_common(parser):
 
 
 def parser_for_cli():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(prog='cli.youtube', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
     upload = sub.add_parser('upload', help='上传视频并保存草稿或立即发布')
     add_common(upload)
@@ -608,7 +601,7 @@ def summarize(state, *, success=None, error=None):
     elif data.get('error'):
         result['last_error'] = data['error']
     if state:
-        result['resume_command'] = shlex.join([sys.executable, str(Path(__file__).resolve()), 'resume', '--state-file', str(state.path), '--api-url', data.get('api_url', BASE)])
+        result['resume_command'] = shlex.join([sys.executable, str(Path(__file__).resolve().parent), 'resume', '--state-file', str(state.path), '--api-url', data.get('api_url', BASE)])
     return result
 
 

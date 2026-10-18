@@ -22,9 +22,9 @@ from urllib.error import URLError
 
 
 try:
-    from .browser_client import APIError, BASE, BrowserClient, TransportError
-except ImportError:
-    from browser_client import APIError, BASE, BrowserClient, TransportError
+    from .common.browser_client import APIError, BASE, BrowserClient, TransportError
+except ImportError:  # run as a script: cli/ is on sys.path
+    from common.browser_client import APIError, BASE, BrowserClient, TransportError
 
 
 LOCAL_HTML = """<!doctype html><meta charset="utf-8"><title>Browser Agent local demo</title>

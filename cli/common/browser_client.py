@@ -13,12 +13,12 @@ BASE = "http://127.0.0.1:12345"
 ASSETS = Path(__file__).parent / 'assets'
 
 
-def load_probe(name):
-    """A platform probe (an IIFE expression in assets/) with the shared DOM
-    helpers in scope. Both are wrapped in one function so repeated evaluations
-    never redeclare top-level bindings in the page."""
+def load_probe(path):
+    """A platform probe (an IIFE expression, usually cli/<platform>/probe.js)
+    with the shared DOM helpers in scope. Both are wrapped in one function so
+    repeated evaluations never redeclare top-level bindings in the page."""
     helpers = (ASSETS / 'dom_helpers.js').read_text(encoding='utf-8')
-    probe = (ASSETS / name).read_text(encoding='utf-8').strip().rstrip(';')
+    probe = Path(path).read_text(encoding='utf-8').strip().rstrip(';')
     return f'(() => {{\n{helpers}\nreturn {probe};\n}})()'
 
 

@@ -15,7 +15,7 @@ node --test chrome-extension/agent/*.test.mjs
 
 # YouTube CLI: error handling, de-duplication, locks, unknown-publish recovery,
 # content-list reading, title check, thumbnails
-python3 -m unittest cli.tests.test_youtube -v
+python3 -m unittest cli.youtube.tests.test_youtube -v
 ```
 
 ## Against the real proxy, extension and Chrome
@@ -31,7 +31,7 @@ python3 cli/browser_smoke.py --advanced
 
 # YouTube CLI flows on a local mock of Studio: draft, draft resumed into publish,
 # immediate publish, lost publish reply reconciled on resume, login wall, rejected upload
-python3 -m cli.tests.youtube_smoke
+python3 -m cli.youtube.tests.youtube_smoke
 
 # Runnable demo: local form, upload integrity, draft reload and screenshot
 python3 cli/demo.py local
@@ -45,4 +45,4 @@ After changing the extension, reload it in `chrome://extensions` and check `GET 
 - Upload tests verify file selection and the real HTTP transfer, not large-video processing, scheduled publishing or captchas.
 - Mutating actions are never retried automatically: a timeout or dropped connection can leave the outcome unknown, so inspect the site's state (draft or content list) before retrying.
 - `chrome.storage.session` does not survive a browser restart or an extension reload, so managed tabs are not recovered across either; workflows such as the YouTube CLI recover through their own persisted state instead.
-- The YouTube CLI's live-site coverage is described in [cli/YOUTUBE.md](cli/YOUTUBE.md#compatibility-and-known-limits).
+- The YouTube CLI's live-site coverage is described in [cli/youtube/README.md](cli/youtube/README.md#compatibility-and-known-limits).

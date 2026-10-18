@@ -114,4 +114,4 @@ python3 cli/browser_smoke.py --advanced
 
 The default `local` demo exercises a temporary local form, upload with SHA-256 verification, saved draft reload and a screenshot. `hn` reads Hacker News and fills the submit form only when available; it does not submit. Consult `demo.py --help` for the explicit remote upload example and its completion/lifetime options.
 
-For YouTube upload/draft/publish tasks, use `cli/youtube.py` and read [its workflow documentation](../../cli/YOUTUBE.md). It reuses the shared API client, persists upload/publish intent, and reconciles uncertain commits. Do not blindly restart an upload after an ambiguous result.
+For YouTube upload/draft/publish tasks, use `python3 -m cli.youtube` (or `python3 path/to/cli/youtube` from another directory) and read [its workflow documentation](../../cli/youtube/README.md). It reuses the shared API client, persists upload/publish intent, and reconciles uncertain commits. Do not blindly restart an upload after an ambiguous result.

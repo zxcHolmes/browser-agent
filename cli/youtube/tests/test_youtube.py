@@ -7,9 +7,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cli.automation import AutomationError, TaskState, FileLock, claim_upload
-from cli.browser_client import APIError, TransportError
-from cli.youtube import YouTubeWorkflow, parser_for_cli, prepare_upload, main, same_text
+from cli.common.automation import AutomationError, TaskState, FileLock, claim_upload
+from cli.common.browser_client import APIError, TransportError
+from cli.youtube.main import YouTubeWorkflow, parser_for_cli, prepare_upload, main, same_text
 
 CHANNEL='UC'+'0'*22
 
@@ -138,7 +138,7 @@ class DownloadAndClientTests(unittest.TestCase):
     def tearDownClass(cls):cls.server.shutdown();cls.server.server_close()
 
     def test_direct_download_and_html_rejection(self):
-        from cli.youtube import download_video
+        from cli.youtube.main import download_video
         with tempfile.TemporaryDirectory() as temp:
             path=download_video(self.base+'/video',temp,quiet=True)
             self.assertEqual(path.read_bytes(),b'video-content')
@@ -147,14 +147,14 @@ class DownloadAndClientTests(unittest.TestCase):
             self.assertFalse((Path(temp)/'html.part').exists())
 
     def test_client_malformed_json_and_http_error(self):
-        from cli.browser_client import BrowserClient
+        from cli.common.browser_client import BrowserClient
         c=BrowserClient(self.base)
         with self.assertRaises(TransportError):c.request('/bad-json')
         with self.assertRaises(APIError) as caught:c.request('/bad-error')
         self.assertEqual(caught.exception.status,500)
 
     def test_watch_url_is_not_direct_file(self):
-        from cli.youtube import download_video
+        from cli.youtube.main import download_video
         with self.assertRaises(AutomationError) as caught:download_video('https://www.youtube.com/watch?v=TestVideo01','/unused')
         self.assertEqual(caught.exception.code,'NOT_DIRECT_VIDEO_URL')
 
@@ -219,7 +219,7 @@ class ThumbnailTests(unittest.TestCase):
 
     def test_prepare_thumbnail(self):
         import shutil, subprocess
-        from cli.youtube import prepare_thumbnail
+        from cli.youtube.main import prepare_thumbnail
         self.assertIsNone(prepare_thumbnail(None,None,None,self.root))
         png=self.root/'t.png';png.write_bytes(b'png-bytes')
         self.assertEqual(prepare_thumbnail(str(png),None,None,self.root),str(png.resolve()))

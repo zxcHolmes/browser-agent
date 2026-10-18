@@ -463,4 +463,4 @@ Go-request and client-read deadlines.
 
 ## Platform workflow CLIs
 
-[cli/YOUTUBE.md](cli/YOUTUBE.md) documents `cli/youtube.py`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client is `cli/browser_client.py`.
+[cli/youtube/README.md](cli/youtube/README.md) documents `cli/youtube`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client and workflow modules are in [cli/common](cli/common/README.md).

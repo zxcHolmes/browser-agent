@@ -1,6 +1,7 @@
 // Shared, platform-neutral DOM helpers for read-only page probes.
-// A probe is loaded as `dom_helpers.js + "\n" + <platform>_probe.js` (see
-// browser_client.load_probe) and calls these as plain functions.
+// browser_client.load_probe wraps these helpers and a platform probe
+// (cli/<platform>/probe.js) into one evaluation; the probe calls them as plain
+// functions.
 //
 // locate(e) returns a CSS selector that the extension's actions resolve again
 // right before acting (they require exactly one visible match). Selectors are

@@ -81,6 +81,8 @@ function setStatusPill(status) {
     idle:    { cls: 'pill-done',    label: 'Done',    pulse: false },
     error:   { cls: 'pill-error',   label: 'Error',   pulse: false },
     aborted: { cls: 'pill-aborted', label: 'Stopped', pulse: false },
+    paused: { cls: 'pill-aborted', label: 'Paused', pulse: false },
+    interrupted: { cls: 'pill-aborted', label: 'Interrupted', pulse: false },
   }
   const cfg = map[status] || { cls: '', label: status, pulse: false }
 
@@ -337,8 +339,12 @@ function applyEvent(event) {
       break
 
     case 'tool_limit':
-      setStatusPill('idle')
+      setStatusPill('paused')
       appendMeta(`⚠ Reached limit of ${event.max} consecutive tool calls — type a message to continue.`)
+      break
+    case 'interrupted':
+      setStatusPill('interrupted')
+      appendMeta(event.message)
       break
   }
 }

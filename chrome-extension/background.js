@@ -13,7 +13,9 @@
  *  - Long-term storage goes to chrome.storage.local via scheduler.appendHistory
  */
 
-import { setTabRegistry } from './agent/tools.js'
+import { setTabRegistry, toolCdp, toolCreateTab } from './agent/tools.js'
+import { browserAction, ACTION_NAMES } from './agent/browser-actions.js'
+import { createChildAdopter } from './agent/managed-children.js'
 import { runAgent } from './agent/runner.js'
 import {
   restoreAlarms, getTaskIdFromAlarm, getTaskById,
@@ -28,34 +30,75 @@ const DEFAULT_PORT      = 12345
 const CHECK_INTERVAL_MS = 5 * 1000
 const REPLAY_TTL_MS     = 2 * 60 * 1000   // keep completed sessions in memory 2 min (just enough for UI to consume done event)
 
-// Tab idle timeout — read from storage, default 1 minute
-let TAB_TIMEOUT_MS = 1 * 60 * 1000
+// Tab idle timeout — read from storage, default 30 minutes
+let TAB_TIMEOUT_MS = 30 * 60 * 1000
 
 async function loadTabTimeout() {
-  const data = await chrome.storage.local.get(['tabTimeoutMinutes'])
-  const m = Number(data.tabTimeoutMinutes)
-  TAB_TIMEOUT_MS = (Number.isFinite(m) && m > 0 ? m : 1) * 60 * 1000
+  const data = await chrome.storage.local.get(['tabTimeoutMinutes', 'tabTimeoutPolicyVersion'])
+  let m = Number(data.tabTimeoutMinutes)
+  // Upgrade the old one-minute default once; preserve other explicit settings.
+  if (!data.tabTimeoutPolicyVersion && (!Number.isFinite(m) || m <= 1)) m = 30
+  TAB_TIMEOUT_MS = (Number.isFinite(m) && m > 0 ? m : 30) * 60 * 1000
+  await chrome.storage.local.set({tabTimeoutMinutes:TAB_TIMEOUT_MS/60000,tabTimeoutPolicyVersion:2})
 }
 
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.tabTimeoutMinutes) {
     const m = Number(changes.tabTimeoutMinutes.newValue)
-    TAB_TIMEOUT_MS = (Number.isFinite(m) && m > 0 ? m : 1) * 60 * 1000
+    TAB_TIMEOUT_MS = (Number.isFinite(m) && m > 0 ? m : 30) * 60 * 1000
     console.log(`[TabChecker] Timeout updated to ${TAB_TIMEOUT_MS / 1000}s`)
   }
 })
 
 /** @type {Map<number, object>} */
 const managedTabs = new Map()
+const attaching = new Map()
+let persistTimer
+
+function persistManagedTabs() {
+  clearTimeout(persistTimer)
+  persistTimer=setTimeout(()=>{
+    void chrome.storage.session.set({managedBrowserTabs:[...managedTabs.values()].map(serializeTab)})
+  },100)
+}
+
+async function restoreManagedTabs() {
+  const {managedBrowserTabs=[]}=await chrome.storage.session.get('managedBrowserTabs')
+  for (const saved of managedBrowserTabs) {
+    if (managedTabs.has(saved.tabId)) continue
+    const current=await chrome.tabs.get(saved.tabId).catch(()=>null)
+    if (!current) continue
+    managedTabs.set(saved.tabId,{...saved,url:current.url,title:current.title,isAttached:false})
+    try { await attachDebugger(saved.tabId); managedTabs.get(saved.tabId).isAttached=true }
+    catch (e) { console.warn('[Debugger] Restore attach failed:',e.message) }
+  }
+  persistManagedTabs()
+}
 
 let debuggerListenersInstalled = false
 let tabCheckInterval = null
 
 async function attachDebugger(tabId) {
-  await chrome.debugger.attach({ tabId }, '1.3')
+  if (attaching.has(tabId)) return attaching.get(tabId)
+  const promise=attachDebuggerOnce(tabId)
+  attaching.set(tabId,promise)
+  try { return await promise } finally { attaching.delete(tabId) }
+}
+
+async function attachDebuggerOnce(tabId) {
+  // A worker restart can leave the debugger attached; probe before attaching again.
+  try { await chrome.debugger.sendCommand({tabId},'Page.enable') }
+  catch { await chrome.debugger.attach({ tabId }, '1.3') }
   await chrome.debugger.sendCommand({ tabId }, 'Page.enable').catch(() => {})
   await chrome.debugger.sendCommand({ tabId }, 'Runtime.enable').catch(() => {})
   await chrome.debugger.sendCommand({ tabId }, 'Network.enable').catch(() => {})
+  // Hidden tabs can acknowledge mouse CDP commands without dispatching DOM
+  // events. Emulate an active page without activating the user's Chrome tab.
+  await chrome.debugger.sendCommand({tabId},'Emulation.setFocusEmulationEnabled',{enabled:true})
+  await chrome.debugger.sendCommand({tabId},'Target.setAutoAttach',{
+    autoAttach:true,waitForDebuggerOnStart:false,flatten:true,
+    filter:[{type:'iframe',exclude:false}],
+  }).catch(err=>console.warn('[Debugger] Child sessions unavailable:',err.message))
 
   const info = await chrome.debugger.sendCommand({ tabId }, 'Target.getTargetInfo')
   const targetId = String(info?.targetInfo?.targetId || '').trim()
@@ -67,6 +110,7 @@ async function attachDebugger(tabId) {
 
 async function detachDebugger(tabId) {
   try {
+    await chrome.debugger.sendCommand({tabId},'Emulation.setFocusEmulationEnabled',{enabled:false}).catch(()=>{})
     await chrome.debugger.detach({ tabId })
     console.log(`[Debugger] Detached tab ${tabId}`)
   } catch (err) {
@@ -79,6 +123,7 @@ async function closeTab(tabId, reason) {
   if (!tab) return
 
   managedTabs.delete(tabId)
+  persistManagedTabs()
   await detachDebugger(tabId)
 
   try {
@@ -91,15 +136,27 @@ async function closeTab(tabId, reason) {
   pushRelayEvent(tabId, 'tab.closed', { tabId, reason })
 }
 
+async function releaseTab(tabId) {
+  const tab = managedTabs.get(tabId)
+  if (!tab) throw new Error(`Tab ${tabId} not found`)
+  managedTabs.delete(tabId)
+  persistManagedTabs()
+  await detachDebugger(tabId)
+  console.log(`[Tab] Released tab ${tabId} without closing`)
+  pushRelayEvent(tabId, 'tab.released', { tabId })
+}
+
 // Inject shared registry into agent tools
-setTabRegistry(managedTabs, attachDebugger, closeTab)
+setTabRegistry(managedTabs, attachDebugger, closeTab, persistManagedTabs)
 
 function startTabChecker() {
   if (tabCheckInterval) return
   tabCheckInterval = setInterval(async () => {
+    persistManagedTabs()
     const now = Date.now()
     for (const [tabId, tab] of managedTabs.entries()) {
-      if (now - tab.lastActivity >= TAB_TIMEOUT_MS) {
+      if (tab.autoClose === false || tab.pendingOperations > 0) continue
+      if (now - tab.lastActivity >= (tab.idleTimeoutMs || TAB_TIMEOUT_MS)) {
         console.log(`[TabChecker] Tab ${tabId} idle, closing`)
         await closeTab(tabId, 'timeout')
       }
@@ -116,7 +173,33 @@ function installDebuggerListeners() {
     if (!tabId || !managedTabs.has(tabId)) return
     const tab = managedTabs.get(tabId)
     if (tab) tab.lastActivity = Date.now()
-    pushRelayEvent(tabId, method, params)
+    const sessionId=source.sessionId || ''
+    if (method==='Page.javascriptDialogOpening') {
+      tab.dialog={...params,sessionId}
+    } else if(method==='Page.javascriptDialogClosed') {
+      tab.dialog=null
+    } else if (method==='Runtime.executionContextCreated') {
+      tab.contexts ||= new Map()
+      const c=params.context
+      tab.contexts.set(`${sessionId}:${c.id}`,{id:c.id,sessionId,origin:c.origin,name:c.name,frameId:c.auxData?.frameId,isDefault:c.auxData?.isDefault})
+    } else if (method==='Runtime.executionContextDestroyed') {
+      tab.contexts?.delete(`${sessionId}:${params.executionContextId}`)
+    } else if (method==='Runtime.executionContextsCleared') {
+      for (const [key,c] of tab.contexts || []) if(c.sessionId===sessionId) tab.contexts.delete(key)
+    } else if (method==='Target.attachedToTarget') {
+      tab.childSessions ||= new Map()
+      tab.childSessions.set(params.sessionId,{sessionId:params.sessionId,targetId:params.targetInfo.targetId,type:params.targetInfo.type,url:params.targetInfo.url})
+      const child={tabId,sessionId:params.sessionId}
+      void (async()=>{
+        await chrome.debugger.sendCommand(child,'Runtime.enable')
+        await chrome.debugger.sendCommand(child,'Page.enable')
+        await chrome.debugger.sendCommand(child,'Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:false,flatten:true,filter:[{type:'iframe',exclude:false}]})
+      })().catch(e=>console.warn('[Debugger] Child initialization failed:',e.message))
+    } else if(method==='Target.detachedFromTarget') {
+      tab.childSessions?.delete(params.sessionId)
+      for(const [key,c] of tab.contexts || []) if(c.sessionId===params.sessionId)tab.contexts.delete(key)
+    }
+    pushRelayEvent(tabId, method, params, sessionId)
   })
 
   chrome.debugger.onDetach.addListener((source, reason) => {
@@ -131,20 +214,38 @@ function installDebuggerListeners() {
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (!managedTabs.has(tabId)) return
   managedTabs.delete(tabId)
+  persistManagedTabs()
   pushRelayEvent(tabId, 'tab.closed', { tabId, reason: 'user' })
 })
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+// Only descendants of a managed tab are adopted. Existing user tabs stay outside the registry.
+const adoptManagedChild=createChildAdopter({tabs:managedTabs,attach:attachDebugger,
+  changed:persistManagedTabs,event:(tab,parentTabId)=>pushRelayEvent(tab.tabId,'tab.created',{tab:serializeTab(tab),parentTabId})})
+chrome.tabs.onCreated.addListener((created)=>{
+  void adoptManagedChild(created)
+})
+
+// Unlike tab-strip opener metadata, this event directly identifies the page
+// that created a navigation target, including background/noopener windows.
+chrome.webNavigation?.onCreatedNavigationTarget.addListener((details)=>{
+  if(!managedTabs.has(details.sourceTabId))return
+  void adoptManagedChild({id:details.tabId,url:details.url},details.sourceTabId)
+})
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, current) => {
   const tab = managedTabs.get(tabId)
-  if (!tab) return
+  if (!tab) {void adoptManagedChild(current);return}
   if (changeInfo.url)   tab.url   = changeInfo.url
   if (changeInfo.title) tab.title = changeInfo.title
+    persistManagedTabs()
 })
 
 function serializeTab(tab) {
   return {
     tabId: tab.tabId, targetId: tab.targetId, url: tab.url, title: tab.title,
     meta: tab.meta, isAttached: tab.isAttached,
+    autoClose: tab.autoClose !== false,
+    idleTimeoutMs:tab.idleTimeoutMs,
     lastActivity: tab.lastActivity, createdAt: tab.createdAt,
   }
 }
@@ -163,6 +264,7 @@ const BADGE = {
 
 /** @type {WebSocket|null} */
 let relayWs = null
+const relayControllers = new Map()
 let relayConnectPromise = null
 let reconnectAttempts = 0
 let reconnectTimer = null
@@ -187,12 +289,12 @@ async function getRelayPort() {
 }
 
 // pushRelayEvent: only sends to Go relay server WebSocket (CDP events)
-function pushRelayEvent(tabId, eventMethod, eventParams) {
+function pushRelayEvent(tabId, eventMethod, eventParams, sessionId = '') {
   if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return
   try {
     relayWs.send(JSON.stringify({
       method: 'event',
-      params: { tabId, eventMethod, eventParams, timestamp: Date.now() },
+      params: { tabId, sessionId, eventMethod, eventParams, timestamp: Date.now() },
     }))
   } catch {}
 }
@@ -221,9 +323,9 @@ async function ensureRelayConnection() {
       ws.onclose = (ev) => { clearTimeout(t); reject(new Error(`WebSocket closed (${ev.code})`)) }
     })
 
-    ws.onmessage = (event) => void onRelayMessage(String(event.data || ''))
-    ws.onclose = () => onRelayClosed('closed')
-    ws.onerror = () => onRelayClosed('error')
+    ws.onmessage = (event) => void onRelayMessage(String(event.data || ''),ws)
+    ws.onclose = () => { if(relayWs===ws)onRelayClosed('closed') }
+    ws.onerror = () => { if(relayWs===ws)onRelayClosed('error') }
 
     installDebuggerListeners()
     startTabChecker()
@@ -242,6 +344,7 @@ async function ensureRelayConnection() {
 function onRelayClosed(reason) {
   console.warn('[Relay] Connection closed:', reason)
   relayWs = null
+  for (const ctrl of relayControllers.values()) ctrl.abort()
   stopKeepAlive()
   scheduleReconnect()
 }
@@ -274,42 +377,41 @@ function stopKeepAlive() {
   if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null }
 }
 
-async function onRelayMessage(text) {
+async function onRelayMessage(text, socket = relayWs) {
   let msg
   try { msg = JSON.parse(text) } catch { return }
 
   if (msg?.method === 'ping') {
-    try { relayWs.send(JSON.stringify({ method: 'pong' })) } catch {}
+    try { socket.send(JSON.stringify({ method: 'pong' })) } catch {}
+    return
+  }
+  if (msg?.method==='browser.cancel') {
+    relayControllers.get(msg.params?.requestId)?.abort()
     return
   }
 
   if (typeof msg?.id === 'number' && msg?.method) {
     const { id, method, params } = msg
+    const ctrl=new AbortController()
+    relayControllers.set(id,ctrl)
     try {
-      const result = await relayDispatch(method, params || {})
-      relayWs.send(JSON.stringify({ id, result }))
+      const result = await relayDispatch(method, params || {},ctrl.signal)
+      if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({ id, result }))
     } catch (err) {
       console.error(`[Relay] Error method=${method}:`, err.message)
-      relayWs.send(JSON.stringify({ id, error: err.message }))
+      if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({ id, error: err.message }))
+    } finally {
+      if(relayControllers.get(id)===ctrl)relayControllers.delete(id)
     }
   }
 }
 
-async function relayDispatch(method, params) {
+async function relayDispatch(method, params, signal) {
   switch (method) {
     case 'tab.create': {
-      const { url = 'about:blank', active = false, meta = {} } = params
-      const chromeTab = await chrome.tabs.create({ url, active })
-      if (!chromeTab.id) throw new Error('Failed to create tab')
-      const tabId = chromeTab.id
-      await new Promise(r => setTimeout(r, 500))
-      const targetId = await attachDebugger(tabId)
-      const tabInfo = {
-        tabId, targetId, url, title: chromeTab.title || '', meta,
-        isAttached: true, lastActivity: Date.now(), createdAt: Date.now(),
-      }
-      managedTabs.set(tabId, tabInfo)
-      return { tab: serializeTab(tabInfo) }
+      const {url='about:blank',active=false,autoClose=true,meta={}}=params
+      const created=await toolCreateTab({url,active,auto_close:autoClose,meta})
+      return {tab:serializeTab(managedTabs.get(created.tabId))}
     }
     case 'tab.list':
       return { tabs: Array.from(managedTabs.values()).map(serializeTab), count: managedTabs.size }
@@ -324,15 +426,22 @@ async function relayDispatch(method, params) {
       await closeTab(id, 'api')
       return { success: true, tabId: id }
     }
+    case 'tab.release': {
+      const id = Number(params.tabId)
+      await releaseTab(id)
+      return { success: true, tabId: id }
+    }
     case 'cdp.send': {
-      const { tabId, method, params: cdpParams } = params
-      const id = Number(tabId)
-      const tab = managedTabs.get(id)
-      if (!tab) throw new Error(`Tab ${id} not found`)
-      if (!tab.isAttached) { await attachDebugger(id); tab.isAttached = true }
-      tab.lastActivity = Date.now()
-      const result = await chrome.debugger.sendCommand({ tabId: id }, method, cdpParams || {})
+      const { tabId, method, params: cdpParams, sessionId } = params
+      const result = await toolCdp({tab_id:tabId,method,params:cdpParams,session_id:sessionId},signal)
       return { result }
+    }
+    case 'browser.capabilities':
+      return {protocolVersion:2,implementationRevision:6,navigationTracking:!!chrome.webNavigation?.onCreatedNavigationTarget,actions:ACTION_NAMES,defaultIdleTimeoutMinutes:TAB_TIMEOUT_MS/60000,managedTabsOnly:true}
+    case 'browser.action': {
+      const result=await browserAction(params.action,{...(params.args || {}),tab_id:params.tabId},signal)
+      persistManagedTabs()
+      return {result}
     }
     default:
       throw new Error(`Unknown method: ${method}`)
@@ -369,6 +478,33 @@ const activeSessions = new Map()
 /** @type {Map<string, AbortController>} sessionId → AbortController */
 const runningSessions = new Map()
 
+async function restoreSessionCheckpoints() {
+  const stored=await chrome.storage.local.get(null)
+  for (const [key,saved] of Object.entries(stored)) {
+    if (!key.startsWith('agentCheckpoint:') || !saved?.sessionId) continue
+    // Complete any interrupted tool-call group without executing its missing actions.
+    const messages=[]
+    for (let i=0;i<(saved.messages || []).length;i++) {
+      const message=saved.messages[i]
+      messages.push(message)
+      if (message.role!=='assistant' || !message.tool_calls?.length) continue
+      const results=[]
+      while (saved.messages[i+1]?.role==='tool') results.push(saved.messages[++i])
+      messages.push(...results)
+      for(const call of message.tool_calls) if(!results.some(r=>r.tool_call_id===call.id)) {
+        messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify({
+          error:'INTERRUPTED: execution outcome unknown; inspect existing page/draft before retrying',
+        })})
+      }
+    }
+    const session={...saved,messages,status:saved.status==='paused'?'paused':'interrupted'}
+    session.events ||= []
+    session.events.push({type:'interrupted',timestamp:Date.now(),
+      message:'Recovered checkpoint. Inspect the page before continuing; no actions were replayed.'})
+    activeSessions.set(saved.sessionId,session)
+  }
+}
+
 function getSession(sessionId) {
   return activeSessions.get(sessionId) || null
 }
@@ -390,7 +526,7 @@ function listActiveSessions() {
 function evictOldSessions() {
   const cutoff = Date.now() - REPLAY_TTL_MS
   for (const [sessionId, state] of activeSessions.entries()) {
-    if (state.status !== 'running' && (state.updatedAt || 0) < cutoff) {
+    if (!['running','paused','interrupted'].includes(state.status) && (state.updatedAt || 0) < cutoff) {
       activeSessions.delete(sessionId)
     }
   }
@@ -417,6 +553,9 @@ function broadcastProgress(sessionId, event) {
       session.updatedAt = Date.now()
     } else if (event.type === 'running') {
       session.status = 'running'
+    } else if (event.type === 'tool_limit') {
+      session.status = 'paused'
+      session.updatedAt = Date.now()
     }
   }
 
@@ -458,15 +597,23 @@ function runSessionTurn(sessionId, prompt) {
         }
       }
 
-      const { success, result, messages, iterations } = await runAgent(
+      const { success, result, messages, iterations, paused } = await runAgent(
         prompt,
         (event) => broadcastProgress(sessionId, event),
         ctrl.signal,
         session.messages,   // pass existing messages for context
+        async (messages,iterations)=>{
+          // Persist tool intent BEFORE execution, and results AFTER execution.
+          // Recovery pauses rather than replaying a potentially completed publish.
+          await chrome.storage.local.set({[`agentCheckpoint:${sessionId}`]:{
+            ...session,messages:structuredClone(messages),iterations,updatedAt:Date.now(),status:'interrupted',
+          }})
+        },
       )
 
       // Update session messages with the full conversation after this turn
       session.messages = messages
+      if (paused) session.status='paused'
 
       // runner.js already emitted 'done' or 'error' via onProgress.
       // Only emit 'aborted' here if signal was aborted (runner throws, not emits aborted).
@@ -483,13 +630,16 @@ function runSessionTurn(sessionId, prompt) {
         startedAt: session.startedAt,
         finishedAt: Date.now(),
         success, result, iterations,
+        paused:!!paused,
         messages: session.messages,
         events: session.events,   // persist UI event log for history replay
       })
 
       // Free messages[] from memory — history is on disk, UI can replay from there.
       // Keep events[] briefly so the polling UI can still read done/error events.
+      if (paused) await chrome.storage.local.set({[`agentCheckpoint:${sessionId}`]:{...session,status:'paused'}})
       session.messages = []
+      if (!paused) await chrome.storage.local.remove(`agentCheckpoint:${sessionId}`)
     } catch (err) {
       console.error(`[Agent] Session ${sessionId} error:`, err.message)
       // Only emit error if runner didn't already (runner catches internally and returns, so errors here are unexpected)
@@ -507,6 +657,7 @@ function runSessionTurn(sessionId, prompt) {
         events: session.events,
       })
       session.messages = []
+      await chrome.storage.local.remove(`agentCheckpoint:${sessionId}`)
     } finally {
       runningSessions.delete(sessionId)
       evictOldSessions()
@@ -537,6 +688,7 @@ async function startSession(taskId, prompt, taskName, existingMessages = null) {
     messages:   existingMessages || [],  // pre-load from history if resuming
   }
   activeSessions.set(sessionId, session)
+  await chrome.storage.local.set({[`agentCheckpoint:${sessionId}`]:{...session,status:'interrupted'}})
 
   installDebuggerListeners()
   startTabChecker()
@@ -561,7 +713,6 @@ function abortSession(sessionId) {
   const ctrl = runningSessions.get(sessionId)
   if (ctrl) {
     ctrl.abort()
-    runningSessions.delete(sessionId)
     broadcastProgress(sessionId, { type: 'aborted' })
   }
 }
@@ -728,7 +879,11 @@ chrome.runtime.onInstalled.addListener(() => {
 
 ;(async () => {
   console.log('[Init] Browser Agent starting')
+  installDebuggerListeners()
   await loadTabTimeout()
+  await restoreManagedTabs()
+  await restoreSessionCheckpoints()
+  startTabChecker()
   await restoreAlarms()
 
   try {
@@ -736,6 +891,7 @@ chrome.runtime.onInstalled.addListener(() => {
     console.log('[Init] Relay connected')
   } catch (err) {
     console.warn('[Init] Relay not available (agent works without relay):', err.message)
+    scheduleReconnect()
   }
   setBadge('off')
   setTitle('Browser Agent')

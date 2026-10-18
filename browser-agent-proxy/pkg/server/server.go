@@ -49,9 +49,15 @@ func NewServer(cfg *config.Config, log *logrus.Logger) *Server {
 
 	// High-level action APIs (must be registered before the wildcard /api/tabs/ route)
 	actionsH := handler.NewActionsHandler(hub, eventStore, log)
+	browserH := handler.NewBrowserHandler(hub)
+	mux.HandleFunc("/api/capabilities", browserH.Capabilities)
 	mux.HandleFunc("/api/tabs/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case hasSuffix(path, "/action"):
+			browserH.Action(w, r)
+		case hasSuffix(path, "/release"):
+			tabH.ReleaseTab(w, r)
 		case hasSuffix(path, "/navigate"):
 			actionsH.Navigate(w, r)
 		case hasSuffix(path, "/screenshot"):

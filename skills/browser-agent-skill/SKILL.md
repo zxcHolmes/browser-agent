@@ -1,300 +1,117 @@
 ---
 name: browser-agent-skill
-description: Browser automation via the Browser Agent Proxy REST API — tab management, CDP commands, navigation, screenshot, JS eval, and event polling.
+description: Automate normal Chrome through the local Browser Agent Proxy, including forms, rich text, local file uploads, iframe interactions, screenshots, and managed tab lifetimes. Use when this project's Go server and Chrome extension are the browser control transport.
 ---
 
-# Browser Agent Proxy — How to Control Chrome
+# Browser Agent
 
-## What it is
+Use the local Go REST API at `http://127.0.0.1:12345`. Chrome runs normally; no remote-debugging launch flags are required. Prefer the shared semantic actions over generating JavaScript for every interaction.
 
-A Go server + Chrome Extension that lets you control a normal Chrome browser via a simple REST API. No `--remote-debugging-port` or Playwright required.
+Read [API.md](../../API.md) for full request/response schemas. See [cli/demo.py](../../cli/demo.py) for runnable local upload/draft and optional Hacker News examples.
 
-```
-Your Code (HTTP REST)
-      ↓
-Go Server  (localhost:12345)
-      ↓
-Chrome Extension  (chrome.debugger bridge)
-      ↓
-Chrome Browser
-```
+## Connect and identify capabilities
 
-**Important constraint**: Only tabs created through `POST /api/tabs` are managed. Tabs the user opens manually are invisible to the API.
+Start the server if needed:
 
----
-
-## Base URL
-
-```
-http://localhost:12345
+```bash
+cd browser-agent-proxy
+go run .
 ```
 
-All responses follow this envelope:
+The extension reconnects automatically. Query `GET /api/capabilities` to verify the loaded implementation. Protocol 2 exposes the high-level actions; implementation revision 4 adds navigation-source tracking (`navigationTracking:true`, extension 2.1.0 with `webNavigation` permission). Revision 5 (extension 2.1.1) verifies selected files through a retained input node even if the site removes the input. Revision 6 (extension 2.1.2) ignores the trailing newline rich editors add when verifying `fill`. If an action is missing, reload the extension instead of assuming the disk version is already running.
 
-```json
-{ "success": true, "data": { ... } }
-{ "success": false, "error": "...", "code": "ERROR_CODE" }
-```
+API responses use `{success:true,data:{...}}` or `{success:false,error,code}`. `/screenshot` is an exception: it returns image bytes. Check HTTP status and the envelope; preserve error details.
 
----
+## Ownership and lifetime
 
-## Core Workflow
+- Operate on API-created managed tabs. Reuse an appropriate managed tab when its task metadata and state match the current work.
+- Existing user tabs stay outside the registry. New windows can be associated only through Chrome's explicit opener or navigation-source relationship to a managed tab; do not infer ownership from matching URLs.
+- Default idle close is **30 minutes**, checked every 5 seconds. Explicit extension settings can override it. Pending/running actions prevent idle cleanup; CDP commands and events refresh activity.
+- For uploading, processing, or manual intervention, create with `autoClose:false` or call `set_tab_policy` with `auto_close:false`. This protects the page between actions as well as during a wait.
+- `DELETE /api/tabs/{id}` closes the page. `POST /api/tabs/{id}/release` stops management without closing it. Release pages that the user needs to finish manually.
+- A missing or closed tab returns 404 (`TAB_NOT_FOUND` or, on some CDP paths, `TAB_CLOSED`). Recreate only after checking whether the task may already have produced a draft or publication.
 
-Every automation follows the same pattern:
+## Observe → act → verify
 
-1. **Create a tab** → get `tabId`
-2. **Navigate** to a URL
-3. **Wait for load** (poll events or use the `/navigate` shortcut)
-4. **Interact** (JS eval, click, type, screenshot, raw CDP)
-5. **Close the tab**
+Create a tab with `POST /api/tabs`, retain `data.tab.tabId`, then navigate via `POST /api/tabs/{id}/navigate`. A document load event does not prove an SPA or editor is ready. Use `wait_for` on the actual element/state.
 
----
-
-## Tab Management
-
-### Create a tab
+All semantic actions use:
 
 ```http
-POST /api/tabs
+POST /api/tabs/123/action
+Content-Type: application/json
+
+{"action":"fill","args":{"target":{"role":"textbox","name":"Title"},"value":"New title"},"timeoutSeconds":40}
 ```
 
-```json
-{ "url": "https://example.com", "active": false, "meta": { "job": "scrape-001" } }
+Call `snapshot` to observe text and elements. It returns `ref`, role, accessible name, value, visible/enabled state, and file-input metadata. Targets can be a unique CSS selector, `{"ref":"..."}`, or `{"role":"button","name":"Save"}`. Names match exactly by default; `exact:false` permits substring matching. Open Shadow DOM is searched. Ambiguous matches fail; narrow the target instead of choosing an arbitrary match. Refresh refs after navigation or a stale-element error.
+
+| Action | Key arguments / purpose |
+|---|---|
+| `snapshot` | `limit` (default 200, max 500); observe current page |
+| `click` | `target`; visible/enabled/unobscured browser mouse click |
+| `fill` | `target`, string `value`; replace input/textarea/contenteditable through browser input, verify value |
+| `press` | `key`, optional `target`; Enter, Tab, Escape, arrows, Meta+a, Control+a |
+| `select_option` | `target`, string array `values`; native select |
+| `set_checked` | `target`, boolean `checked`; native checkbox/radio |
+| `wait_for` | `target`, `state`, optional `value`, `timeout_seconds` |
+| `upload_files` | `target`, `files` array of absolute local paths |
+| `set_tab_policy` | `auto_close`, `idle_timeout_minutes` (1..1440) |
+| `list_frames` | Frame tree, execution contexts and child sessions |
+| `handle_dialog` | boolean `accept`, optional `prompt_text` |
+
+For custom rich-text editors, verify application state or a saved/reopened draft, not just the DOM's appearance. Specialized editors and drag/drop-only controls may require additional site-specific actions.
+
+### Waits and dialogs
+
+Wait states: `attached`, `visible`, `hidden`, `absent`, `enabled`, `text`, `value`, `url`. Page-wide `text` and `url` checks can omit the target. Default wait is 30 seconds, maximum 300; the outer `timeoutSeconds` must be longer (default 40, maximum 330). Set the HTTP client's read timeout longer still. A timeout is an error, not completion.
+
+If a click/eval reports `JAVASCRIPT_DIALOG_OPEN`, inspect the dialog metadata (also returned by `snapshot`) and use `handle_dialog` as appropriate to the task. The triggering click may already have executed. Dialog handling bypasses the tab action queue so it can unblock the triggering command.
+
+### Frames
+
+For a same-origin iframe, add `frame_selector` to action arguments. For a cross-origin frame, call `list_frames`, select its default context using `origin`/`frameId`, then pass `context_id:context.id` and `session_id:context.sessionId`. Contexts become invalid after navigation; enumerate again. Top-page JavaScript cannot directly read a cross-origin iframe.
+
+The raw `/api/cdp` request uses camelCase `sessionId`; semantic action arguments use snake_case `session_id`. Raw `/eval` has no frame parameters: use the semantic tools or `/api/cdp` with the context/session instead.
+
+## Upload and publishing
+
+Use `upload_files` for hidden or visible `input[type=file]`. Paths must exist on the **Chrome machine**. Go validates that they are readable regular files, assuming Go and Chrome share the local filesystem. No file bytes pass through the control WebSocket or model context. A remote Go deployment needs separate file staging before this call.
+
+Example sequence (separate requests to `/api/tabs/{id}/action`; selectors/text must come from the actual page):
+
+```jsonl
+{"action":"set_tab_policy","args":{"auto_close":false}}
+{"action":"upload_files","args":{"target":"input[type=file]","files":["/absolute/path/video.mp4"]}}
+{"action":"wait_for","args":{"target":".upload-status","state":"text","value":"Upload complete","timeout_seconds":240},"timeoutSeconds":250}
 ```
 
-Returns the tab object with `tabId` — keep this, it's the key to everything else.
+`upload_files` returns `stage:"selected"` and selected file metadata. Distinguish **selected**, **uploaded**, **processed**, **draft saved**, **scheduled**, and **published**. Continue waiting for the state the user requested. Keep unfinished pages open; do not put upload cleanup in an unconditional close-tab `finally` block.
 
-### List / get / close tabs
+Verify the saved title/body/settings and, where available, a content ID, management-list entry or final URL before reporting success. The primitives do not implement a universal YouTube/TikTok publishing workflow or exactly-once publication.
 
-```http
-GET    /api/tabs          # list all managed tabs
-GET    /api/tabs/{tabId}  # get one tab
-DELETE /api/tabs/{tabId}  # close a tab
+On timeout/disconnect, inspect the existing page, draft or content list before repeating a submission. The server does not retry mutations. HTTP cancellation is forwarded to stop waits/later commands, but cannot undo input already dispatched.
+
+“Allow access to file URLs” enables `file://` pages (local HTML/offline tools). It is separate from selecting local files on an HTTPS upload form; this project's upload path was tested before that setting was enabled.
+
+## Read-only extraction and troubleshooting
+
+Use `/eval` for page data extraction, `/screenshot` for visual inspection, and `/api/cdp` for commands not covered above. `chrome.debugger` restricts CDP methods; `Target.getTargets` returns `Not allowed` on the tested Chrome. Use managed-tab APIs rather than assuming browser-wide target control.
+
+Events: `GET /api/events?tabId=123&method=Page.&method=Network.&since=...`. Retention is **3 minutes**, with a **10,000-event global cap**; this is independent of the 30-minute tab timeout. `since` filters Go receive time; do not treat events as durable task history. Child events include `sessionId`. `tab.created` includes the managed child's `meta.parentTabId`; `tab.released`, `tab.closed`, and `debugger.detached` report lifecycle changes.
+
+For uncertain interactions, refresh the snapshot and inspect the page before repeating the same action. Preserve a page awaiting login, a user decision or upload processing.
+
+## Run maintained examples
+
+From the repository root (Python 3.8+, standard library only):
+
+```bash
+python3 cli/demo.py local
+python3 cli/demo.py hn
+python3 cli/browser_smoke.py --advanced
 ```
 
----
+The default `local` demo exercises a temporary local form, upload with SHA-256 verification, saved draft reload and a screenshot. `hn` reads Hacker News and fills the submit form only when available; it does not submit. Consult `demo.py --help` for the explicit remote upload example and its completion/lifetime options.
 
-## High-Level Actions (recommended)
-
-These combine multiple CDP calls so you don't have to.
-
-### Navigate and wait for load
-
-```http
-POST /api/tabs/{tabId}/navigate
-```
-
-```json
-{ "url": "https://example.com", "waitForLoad": true, "timeoutSeconds": 30 }
-```
-
-Blocks until `Page.loadEventFired` fires — no manual event polling needed.
-
-### Screenshot (raw bytes)
-
-```http
-GET /api/tabs/{tabId}/screenshot
-GET /api/tabs/{tabId}/screenshot?format=jpeg&quality=80
-```
-
-Returns raw image bytes (`Content-Type: image/png` or `image/jpeg`) — ready to pass to a vision model or save to disk.
-
-### Eval (JavaScript)
-
-```http
-POST /api/tabs/{tabId}/eval
-```
-
-```json
-{ "expression": "document.title", "awaitPromise": false, "timeoutSeconds": 30 }
-```
-
-Returns:
-```json
-{ "type": "string", "value": "Example Domain" }
-```
-
-Always sets `returnByValue: true` and unwraps the result — simpler than raw CDP.
-
----
-
-## Raw CDP Commands
-
-For anything not covered by the high-level actions:
-
-```http
-POST /api/cdp
-```
-
-```json
-{
-  "tabId": 123,
-  "method": "Network.getCookies",
-  "params": {},
-  "timeout": 30
-}
-```
-
-The debugger is auto-attached on the first command. Every successful command resets the 3-minute idle timer.
-
-**Common CDP methods**:
-- `Page.navigate` — fire navigation (no load-wait; use `/navigate` or poll events instead)
-- `Page.captureScreenshot` — base64 PNG/JPEG (use `/screenshot` for raw bytes)
-- `Runtime.evaluate` — run JS (use `/eval` for simpler interface)
-- `Input.dispatchKeyEvent` — send keystrokes
-- `Network.getCookies` / `Network.setCookie`
-- `DOM.querySelector`, `DOM.getDocument`
-
----
-
-## Event Polling
-
-CDP events and system events are stored server-side for 3 minutes. Query them to know when things happen:
-
-```http
-GET /api/events?tabId=123&method=Page.loadEventFired&since=1700000000000
-```
-
-| Param | Description |
-|-------|-------------|
-| `tabId` | Filter by tab (omit for all tabs) |
-| `method` | Exact match or domain prefix (`Page.`, `Network.`). Repeatable (OR logic) |
-| `since` | Unix ms — return only events newer than this |
-
-**System events** (non-CDP):
-
-| eventMethod | Description |
-|-------------|-------------|
-| `tab.closed` | Tab closed. `reason`: `"timeout"` / `"api"` / `"user"` |
-| `debugger.detached` | DevTools was opened by user, detaching debugger |
-
----
-
-## Tab Idle Timeout
-
-Tabs with no CDP activity for **3 minutes** are automatically closed by the extension. When a tab times out:
-- Extension fires `tab.closed` event (reason=`"timeout"`)
-- Subsequent CDP calls return `404 TAB_CLOSED`
-- Caller must recreate the tab
-
-The timeout is configurable in extension options (`tabTimeoutMinutes`).
-
----
-
-## Python Helper Pattern
-
-```python
-import json, time, requests
-
-BASE = "http://localhost:12345"
-
-def create_tab(url, meta=None):
-    r = requests.post(f"{BASE}/api/tabs", json={"url": url, "active": True, "meta": meta or {}})
-    r.raise_for_status()
-    return r.json()["data"]["tab"]
-
-def close_tab(tab_id):
-    requests.delete(f"{BASE}/api/tabs/{tab_id}")
-
-def cdp(tab_id, method, params=None, timeout=30):
-    r = requests.post(f"{BASE}/api/cdp", json={"tabId": tab_id, "method": method, "params": params or {}, "timeout": timeout})
-    r.raise_for_status()
-    return r.json()["data"].get("result", {})
-
-def evaluate(tab_id, expression, timeout=30):
-    result = cdp(tab_id, "Runtime.evaluate", {"expression": expression, "returnByValue": True, "awaitPromise": True}, timeout=timeout)
-    return result.get("result", {}).get("value")
-
-def navigate(tab_id, url, timeout=30):
-    """Navigate and wait for load event."""
-    r = requests.post(f"{BASE}/api/tabs/{tab_id}/navigate", json={"url": url, "waitForLoad": True, "timeoutSeconds": timeout})
-    r.raise_for_status()
-    return r.json()["data"]
-
-def wait_for_load(tab_id, max_wait=15):
-    """Poll events until Page.loadEventFired."""
-    start_ms = int(time.time() * 1000)
-    deadline = time.time() + max_wait
-    while time.time() < deadline:
-        r = requests.get(f"{BASE}/api/events", params={"tabId": tab_id, "method": "Page.loadEventFired", "since": start_ms})
-        if r.json()["data"]["count"] > 0:
-            return
-        time.sleep(0.5)
-    raise TimeoutError(f"Tab {tab_id} did not load within {max_wait}s")
-
-def type_into(tab_id, selector, text):
-    """Clear a field and type text character by character."""
-    evaluate(tab_id, f"""
-        (function() {{
-            const el = document.querySelector({json.dumps(selector)});
-            el.focus(); el.value = '';
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-        }})()
-    """)
-    for ch in text:
-        cdp(tab_id, "Input.dispatchKeyEvent", {"type": "keyDown", "text": ch})
-        cdp(tab_id, "Input.dispatchKeyEvent", {"type": "keyUp",   "text": ch})
-    evaluate(tab_id, f"""
-        (function() {{
-            const el = document.querySelector({json.dumps(selector)});
-            el.dispatchEvent(new Event('input',  {{bubbles: true}}));
-            el.dispatchEvent(new Event('change', {{bubbles: true}}));
-        }})()
-    """)
-```
-
-### Full example — scrape a page
-
-```python
-tab = create_tab("https://news.ycombinator.com", meta={"job": "scrape-hn"})
-tab_id = tab["tabId"]
-try:
-    wait_for_load(tab_id)
-    stories = json.loads(evaluate(tab_id, """
-        JSON.stringify([...document.querySelectorAll('tr.athing')].map(row => ({
-            title: row.querySelector('.titleline > a')?.innerText,
-            url:   row.querySelector('.titleline > a')?.href,
-        })))
-    """))
-    print(json.dumps(stories[:5], indent=2))
-finally:
-    close_tab(tab_id)
-```
-
-### Full example — fill a form
-
-```python
-tab = create_tab("https://example.com/form")
-tab_id = tab["tabId"]
-try:
-    wait_for_load(tab_id)
-    type_into(tab_id, 'input[name="title"]', "My Title")
-    type_into(tab_id, 'textarea[name="body"]', "My message body")
-    # screenshot to verify before submitting
-    import base64
-    shot = cdp(tab_id, "Page.captureScreenshot", {"format": "png"})
-    open("/tmp/form.png", "wb").write(base64.b64decode(shot["data"]))
-    # evaluate(tab_id, "document.querySelector('button[type=submit]').click()")
-finally:
-    close_tab(tab_id)
-```
-
----
-
-## Error Codes
-
-| Code | HTTP | Meaning |
-|------|------|---------|
-| `EXTENSION_NOT_CONNECTED` | 503 | Extension not loaded or crashed |
-| `TAB_NOT_FOUND` | 404 | Tab doesn't exist or wasn't created via API |
-| `TAB_CLOSED` | 404 | Tab timed out or was closed — recreate it |
-| `CDP_COMMAND_FAILED` | 500 | Chrome rejected the CDP command |
-| `JS_EXCEPTION` | 422 | JavaScript expression threw |
-| `INVALID_REQUEST` | 400 | Bad request body |
-| `TAB_ID_REQUIRED` | 400 | Missing tabId |
-| `METHOD_REQUIRED` | 400 | Missing CDP method |
-| `URL_REQUIRED` | 400 | Missing url (navigate) |
-| `EXPRESSION_REQUIRED` | 400 | Missing expression (eval) |
-
----
-
+For YouTube upload/draft/publish tasks, use `cli/youtube.py` and read [its workflow documentation](../../cli/YOUTUBE.md). It reuses the shared API client, persists upload/publish intent, and reconciles uncertain commits. Do not blindly restart an upload after an ambiguous result.

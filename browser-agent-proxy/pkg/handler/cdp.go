@@ -32,10 +32,11 @@ func (h *CDPHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		TabID   int                    `json:"tabId"`
-		Method  string                 `json:"method"`
-		Params  map[string]interface{} `json:"params"`
-		Timeout int                    `json:"timeout"`
+		TabID     int                    `json:"tabId"`
+		Method    string                 `json:"method"`
+		Params    map[string]interface{} `json:"params"`
+		Timeout   int                    `json:"timeout"`
+		SessionID string                 `json:"sessionId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
@@ -54,9 +55,10 @@ func (h *CDPHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := map[string]interface{}{
-		"tabId":  body.TabID,
-		"method": body.Method,
-		"params": body.Params,
+		"tabId":     body.TabID,
+		"method":    body.Method,
+		"params":    body.Params,
+		"sessionId": body.SessionID,
 	}
 
 	h.log.WithFields(logrus.Fields{
@@ -64,7 +66,7 @@ func (h *CDPHandler) Send(w http.ResponseWriter, r *http.Request) {
 		"method": body.Method,
 	}).Debug("[CDP] Forwarding command")
 
-	result, err := h.hub.Send("cdp.send", params, body.Timeout)
+	result, err := h.hub.SendContext(r.Context(), "cdp.send", params, body.Timeout)
 	if err != nil {
 		if isTabClosedError(err) {
 			writeError(w, http.StatusNotFound, "tab was closed or not found: "+err.Error(), "TAB_CLOSED")

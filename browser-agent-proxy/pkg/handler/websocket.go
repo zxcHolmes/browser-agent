@@ -77,7 +77,7 @@ func (h *WebSocketHandler) readPump(client *relay.Client) {
 		}
 
 		h.log.Debug("Received message from extension")
-		if err := h.hub.HandleMessage(message); err != nil {
+		if err := h.hub.HandleClientMessage(client, message); err != nil {
 			h.log.WithError(err).Error("Failed to handle message")
 		}
 	}
@@ -95,6 +95,8 @@ func (h *WebSocketHandler) writePump(client *relay.Client) {
 
 	for {
 		select {
+		case <-client.Done:
+			return
 		case message, ok := <-client.Send:
 			client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if !ok {

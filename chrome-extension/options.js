@@ -233,11 +233,11 @@ document.getElementById('relay-connect-btn').addEventListener('click', async () 
 // Tab timeout settings
 async function loadTabTimeoutSettings() {
   const data = await chrome.storage.local.get(['tabTimeoutMinutes'])
-  document.getElementById('tab-timeout').value = data.tabTimeoutMinutes || 1
+  document.getElementById('tab-timeout').value = data.tabTimeoutMinutes || 30
 }
 
 document.getElementById('save-tab-timeout-btn').addEventListener('click', async () => {
-  const minutes = Math.max(1, parseInt(document.getElementById('tab-timeout').value, 10) || 1)
+  const minutes = Math.min(1440,Math.max(1, parseInt(document.getElementById('tab-timeout').value, 10) || 30))
   await chrome.storage.local.set({ tabTimeoutMinutes: minutes })
   setStatus('tab-timeout-status', 'ok', `Saved — tabs close after ${minutes} min idle`)
 })

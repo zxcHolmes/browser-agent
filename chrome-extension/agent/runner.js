@@ -14,25 +14,18 @@ import { chatCompletion, trimMessages, estimateTokens, loadLLMConfig } from './l
  * For screenshot: injects the image into the messages array as a vision message,
  * and returns the dataUrl so the UI can display it.
  */
-async function dispatchTool(name, args, messages) {
+async function dispatchTool(name, args, signal) {
   const fn = TOOL_FUNCTIONS[name]
   if (!fn) {
     return { resultStr: JSON.stringify({ error: `Unknown tool: ${name}` }), dataUrl: null }
   }
 
   try {
-    const result = await fn(args)
+    const result = await fn(args, signal)
 
     // Screenshot: inject image into conversation so the model can see it
     if (name === 'screenshot' && result?.dataUrl) {
       const { dataUrl, format, tabId } = result
-      messages.push({
-        role: 'user',
-        content: [
-          { type: 'text', text: `[Screenshot of tab ${tabId}]` },
-          { type: 'image_url', image_url: { url: dataUrl } },
-        ],
-      })
       return { resultStr: JSON.stringify({ ok: true, tabId, format, injected: true }), dataUrl }
     }
 
@@ -59,7 +52,7 @@ const MAX_ITERATIONS = 50
  * @param {object[]} [existingMessages] - Prior conversation messages to continue from
  * @returns {Promise<{success: boolean, result: string, messages: object[], iterations: number}>}
  */
-export async function runAgent(prompt, onProgress = null, signal = null, existingMessages = null) {
+export async function runAgent(prompt, onProgress = null, signal = null, existingMessages = null, onCheckpoint = null) {
   const config = await loadLLMConfig()
 
   const notify = (data) => { if (onProgress) onProgress(data) }
@@ -107,13 +100,14 @@ export async function runAgent(prompt, onProgress = null, signal = null, existin
       notify({ type: 'iteration', iteration, tokenEst, dropped, usage: null })
       console.log(`[Runner] Iteration ${iteration} | est=${tokenEst} tokens`)
 
-      const { message, usage } = await chatCompletion(messages, TOOL_SCHEMAS, config)
+      const { message, usage } = await chatCompletion(messages, TOOL_SCHEMAS, config, signal)
 
       console.log(`[Runner] Usage: prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}`)
       notify({ type: 'token_usage', iteration, promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens, totalTokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) })
 
       const toolCalls = message.tool_calls || []
       messages.push(message)
+      if (onCheckpoint) await onCheckpoint(messages, iteration)
 
       if (!toolCalls.length) {
         // Model replied without tools — natural end of turn
@@ -124,9 +118,10 @@ export async function runAgent(prompt, onProgress = null, signal = null, existin
         return { success: true, result: final, messages, iterations: iteration }
       }
 
-      // Execute tool calls
+      // Resolve every tool_call before inserting images or pausing. Some model
+      // APIs reject a user image message interleaved with outstanding results.
+      const screenshots=[]
       for (const tc of toolCalls) {
-        if (signal?.aborted) throw new Error('Agent aborted')
 
         const tcId   = tc.id || ''
         const fnName = tc.function?.name || ''
@@ -138,7 +133,10 @@ export async function runAgent(prompt, onProgress = null, signal = null, existin
         console.log(`[Runner] Tool call: ${fnName}`, JSON.stringify(fnArgs).slice(0, 200))
         notify({ type: 'tool_call', name: fnName, args: fnArgs })
 
-        const { resultStr, dataUrl } = await dispatchTool(fnName, fnArgs, messages)
+        const skipped = signal?.aborted || (maxToolCalls > 0 && consecutiveToolCalls >= maxToolCalls)
+        const { resultStr, dataUrl } = skipped
+          ? {resultStr:JSON.stringify({error:'NOT_EXECUTED: turn aborted or tool limit reached; inspect state before continuing'}),dataUrl:null}
+          : await dispatchTool(fnName, fnArgs, signal)
 
         console.log(`[Runner] Tool result: ${fnName} → ${resultStr.slice(0, 200)}`)
         notify({ type: 'tool_result', name: fnName, result: resultStr, dataUrl })
@@ -148,16 +146,24 @@ export async function runAgent(prompt, onProgress = null, signal = null, existin
           tool_call_id: tcId,
           content: resultStr,
         })
+        if (dataUrl) screenshots.push({role:'user',content:[
+          {type:'text',text:`[Screenshot of tab ${fnArgs.tab_id}]`},
+          {type:'image_url',image_url:{url:dataUrl}},
+        ]})
+        if (onCheckpoint) await onCheckpoint(messages, iteration)
 
-        consecutiveToolCalls++
+        if (!skipped) consecutiveToolCalls++
 
         // Check max consecutive tool calls limit (0 = unlimited)
-        if (maxToolCalls > 0 && consecutiveToolCalls >= maxToolCalls) {
+      }
+      messages.push(...screenshots)
+      if (onCheckpoint) await onCheckpoint(messages, iteration)
+      if (signal?.aborted) throw new Error('Agent aborted')
+      if (maxToolCalls > 0 && consecutiveToolCalls >= maxToolCalls) {
           console.warn(`[Runner] Max consecutive tool calls (${maxToolCalls}) reached — pausing for user input`)
           notify({ type: 'tool_limit', count: consecutiveToolCalls, max: maxToolCalls })
           // messages already contain all tool results — safe to pause here
-          return { success: true, result: '', messages, iterations: iteration, paused: true }
-        }
+          return { success: false, result: 'Paused at tool call limit', messages, iterations: iteration, paused: true }
       }
 
       // Tool calls were executed — reset counter only when model responds without tools
@@ -166,8 +172,8 @@ export async function runAgent(prompt, onProgress = null, signal = null, existin
 
     // MAX_ITERATIONS reached
     const lastMsg = messages.findLast(m => m.role === 'assistant')?.content || ''
-    notify({ type: 'done', result: lastMsg, iterations: iteration, warning: 'max_iterations' })
-    return { success: true, result: lastMsg, messages, iterations: iteration }
+    notify({ type: 'tool_limit', count: iteration, max: MAX_ITERATIONS, reason:'max_iterations' })
+    return { success: false, result: lastMsg || 'Paused at iteration limit', messages, iterations: iteration, paused:true }
 
   } catch (err) {
     console.error('[Runner] Agent error:', err.message)

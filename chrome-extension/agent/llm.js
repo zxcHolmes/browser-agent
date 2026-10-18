@@ -134,7 +134,7 @@ export function trimMessages(messages, maxTokens = MAX_TOKENS) {
  * @param {object} config - { baseUrl, apiKey, model }
  * @returns {Promise<{message, usage}>}
  */
-export async function chatCompletion(messages, tools, config) {
+export async function chatCompletion(messages, tools, config, signal) {
   const url = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`
 
   const headers = { 'Content-Type': 'application/json' }
@@ -158,7 +158,7 @@ export async function chatCompletion(messages, tools, config) {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120_000),
+    signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
   })
 
   if (!res.ok) {

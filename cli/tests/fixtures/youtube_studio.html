@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>Local Studio workflow fixture</title>
+<style>ytcp-uploads-dialog,ytcp-video-share-dialog,ytcp-video-row,ytcp-app{display:block;padding:12px}button,input,textarea{margin:8px}textarea{display:block;width:500px;height:70px}</style>
+<ytcp-app id="app"></ytcp-app>
+<script>
+const CHANNEL='UC0000000000000000000000', ID='TestVideo01';
+const key='studio-fixture', app=document.querySelector('#app');let data=JSON.parse(localStorage.getItem(key)||'null'),step=1;
+const store=()=>localStorage.setItem(key,JSON.stringify(data));
+const button=(id,text)=>`<button id="${id}">${text}</button>`;
+function content(){
+ app.innerHTML=button('upload-icon','Upload videos')+(data?`<ytcp-video-row><a id="video-title" href="https://studio.youtube.com/video/${ID}/edit"></a><div class="tablecell-visibility">${data.draft?'Draft':({public:'Public',unlisted:'Unlisted',private:'Private'})[data.visibility]}</div>${data.draft?button('edit-draft','Edit draft'):''}</ytcp-video-row>`:'');
+ if(data)document.querySelector('#video-title').textContent=data.title;
+ document.querySelector('#upload-icon').onclick=openUpload;
+ if(document.querySelector('#edit-draft'))document.querySelector('#edit-draft').onclick=()=>{step=1;editor();};
+}
+function openUpload(){app.innerHTML=`<ytcp-uploads-dialog><input id="file" type="file" hidden>${button('ytcp-uploads-dialog-close-button','Close')}</ytcp-uploads-dialog>`;
+ document.querySelector('#ytcp-uploads-dialog-close-button').onclick=content;
+ document.querySelector('#file').onchange=()=>{data={title:'file title',description:'',audience:null,draft:true,visibility:'private',uploads:(data?.uploads||0)+1,publishes:0};step=1;store();editor();};
+}
+function editor(){app.innerHTML=`<ytcp-uploads-dialog><div data-step="${step}">Step ${step}</div><a href="https://youtu.be/${ID}">Video link</a><div id="progress-label">Upload complete. Processing complete. Checks complete</div><div id="save-state">Draft saved</div>${step===1?`<textarea data-field="title" id="title"></textarea><textarea data-field="description" id="description"></textarea><label><input type="radio" name="audience" value="VIDEO_MADE_FOR_KIDS_MFK">Yes</label><label><input type="radio" name="audience" value="VIDEO_MADE_FOR_KIDS_NOT_MFK">No</label>`:''}${step===4?['PUBLIC','UNLISTED','PRIVATE'].map(v=>`<label><input type="radio" name="privacy" value="${v}">${v}</label>`).join(''):button('next-button','Next')}${step===4?button('done-button','Publish'):''}${button('ytcp-uploads-dialog-close-button','Close')}</ytcp-uploads-dialog>`;
+ if(step===1){for(const k of ['title','description']){const e=document.querySelector('#'+k);e.value=data[k];e.oninput=()=>{data[k]=e.value;store();};}
+ for(const e of document.querySelectorAll('[name=audience]')){e.checked=e.value===data.audience;e.onchange=()=>{data.audience=e.value;store();};}}
+ for(const e of document.querySelectorAll('[name=privacy]')){e.checked=e.value.toLowerCase()===data.visibility;e.onchange=()=>{data.visibility=e.value.toLowerCase();store();};}
+ if(step<4)document.querySelector('#next-button').onclick=()=>{step++;editor();};
+ if(step===4)document.querySelector('#done-button').onclick=()=>{data.draft=false;data.publishes++;store();app.innerHTML=`<ytcp-video-share-dialog>Video published <a href="https://youtu.be/${ID}">Video link</a></ytcp-video-share-dialog>`;};
+ document.querySelector('#ytcp-uploads-dialog-close-button').onclick=()=>{store();content();};
+}
+if(!location.pathname.includes('/channel/'))history.replaceState(null,'','/channel/'+CHANNEL);
+content();
+</script>

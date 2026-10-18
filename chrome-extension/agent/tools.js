@@ -5,6 +5,8 @@
  * no Browser Agent Proxy required.
  */
 
+import { configureBrowserActions, BROWSER_TOOL_FUNCTIONS, BROWSER_TOOL_SCHEMAS, withManagedTab } from './browser-actions.js'
+
 // ─── Tab registry (shared with background.js via import) ───────────────────────
 // managedTabs is injected by the background service worker via setTabRegistry()
 
@@ -14,38 +16,42 @@ let _managedTabs = null
 let _attachDebugger = null
 /** @type {Function} */
 let _closeTab = null
+let _registryChanged = () => {}
 
-export function setTabRegistry(managedTabs, attachDebugger, closeTab) {
+export function setTabRegistry(managedTabs, attachDebugger, closeTab, registryChanged = () => {}) {
   _managedTabs = managedTabs
   _attachDebugger = attachDebugger
   _closeTab = closeTab
+  _registryChanged = registryChanged
+  configureBrowserActions(managedTabs, attachDebugger)
 }
 
 // ─── Tool implementations ──────────────────────────────────────────────────────
 
-export async function toolCreateTab({ url = 'about:blank', active = false, meta = {} } = {}) {
+export async function toolCreateTab({ url = 'about:blank', active = false, auto_close = true, meta = {} } = {}) {
   const chromeTab = await chrome.tabs.create({ url, active: !!active })
   if (!chromeTab.id) throw new Error('Failed to create tab: no tabId returned')
 
   const tabId = chromeTab.id
-  await new Promise(r => setTimeout(r, 500))
-
-  const targetId = await _attachDebugger(tabId)
-
   const tabInfo = {
-    tabId,
-    targetId,
-    url,
-    title: chromeTab.title || '',
-    meta: meta || {},
-    isAttached: true,
-    lastActivity: Date.now(),
-    createdAt: Date.now(),
+    tabId, url, title: chromeTab.title || '', meta: meta || {}, autoClose: auto_close,
+    isAttached: false, pendingOperations: 1, lastActivity: Date.now(), createdAt: Date.now(),
   }
   _managedTabs.set(tabId, tabInfo)
-
-  console.log(`[AgentTools] Created tab ${tabId} url=${url}`)
-  return { tabId, url, title: tabInfo.title, meta: tabInfo.meta }
+  try {
+    tabInfo.targetId = await _attachDebugger(tabId)
+    tabInfo.isAttached = true
+    const latest = await chrome.tabs.get(tabId)
+    tabInfo.url=latest.url || url;tabInfo.title=latest.title || ''
+    return { tabId, url:tabInfo.url, title:tabInfo.title, meta:tabInfo.meta }
+  } catch (e) {
+    await _closeTab(tabId, 'create_failed')
+    throw e
+  } finally {
+    tabInfo.pendingOperations=0
+    tabInfo.lastActivity=Date.now()
+    _registryChanged()
+  }
 }
 
 export async function toolListTabs() {
@@ -69,116 +75,62 @@ export async function toolCloseTab({ tab_id } = {}) {
   return { success: true, tabId: id }
 }
 
-export async function toolNavigate({ tab_id, url, wait_for_load = true, timeout_seconds = 30 } = {}) {
-  const id = Number(tab_id)
-  const tab = _managedTabs.get(id)
-  if (!tab) throw new Error(`Tab ${id} not found`)
-
-  if (!tab.isAttached) {
-    await _attachDebugger(id)
-    tab.isAttached = true
-  }
-
-  tab.lastActivity = Date.now()
-
-  await chrome.debugger.sendCommand({ tabId: id }, 'Page.navigate', { url })
-
-  if (wait_for_load) {
-    await waitForPageLoad(id, timeout_seconds * 1000)
-  }
-
-  // Update tab info
-  const info = await chrome.tabs.get(id).catch(() => null)
-  if (info) { tab.url = info.url || url; tab.title = info.title || '' }
-  tab.lastActivity = Date.now()
-
-  return { tabId: id, url: tab.url, title: tab.title }
-}
-
-async function waitForPageLoad(tabId, timeoutMs) {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs
-    const check = async () => {
-      if (Date.now() > deadline) { resolve(); return }
-      try {
-        const result = await chrome.debugger.sendCommand(
-          { tabId }, 'Runtime.evaluate',
-          { expression: 'document.readyState', returnByValue: true }
-        )
-        if (result?.result?.value === 'complete') { resolve(); return }
-      } catch {}
-      setTimeout(check, 300)
+export async function toolNavigate({ tab_id, url, wait_for_load = true, timeout_seconds = 30 } = {}, signal) {
+  return withManagedTab(tab_id, async (tab, send) => {
+    const nav = await send('Page.navigate', { url })
+    if (nav.errorText) throw new Error(`NAVIGATION_FAILED: ${nav.errorText}`)
+    let loaded = false
+    if (wait_for_load) {
+      const deadline = Date.now() + Math.min(300, Math.max(1, timeout_seconds)) * 1000
+      while (Date.now() < deadline) {
+        signal?.throwIfAborted()
+        try {
+          const result = await send('Runtime.evaluate', { expression: 'document.readyState', returnByValue: true })
+          if (result.result?.value === 'complete') { loaded = true; break }
+        } catch (e) {
+          if (signal?.aborted) throw e
+        }
+        await new Promise(r => setTimeout(r, 200))
+      }
+      if (!loaded) throw new Error('NAVIGATION_TIMEOUT: load did not complete')
     }
-    setTimeout(check, 300)
-  })
+    const info = await chrome.tabs.get(Number(tab_id))
+    tab.url = info.url || url; tab.title = info.title || ''
+    return { tabId: tab.tabId, url: tab.url, title: tab.title, loadEventFired: loaded }
+  }, signal)
 }
 
-export async function toolEval({ tab_id, expression, await_promise = false, timeout_seconds = 30 } = {}) {
-  const id = Number(tab_id)
-  const tab = _managedTabs.get(id)
-  if (!tab) throw new Error(`Tab ${id} not found`)
-
-  if (!tab.isAttached) {
-    await _attachDebugger(id)
-    tab.isAttached = true
-  }
-
-  tab.lastActivity = Date.now()
-
-  const result = await chrome.debugger.sendCommand({ tabId: id }, 'Runtime.evaluate', {
-    expression,
-    awaitPromise: !!await_promise,
-    returnByValue: true,
-    timeout: timeout_seconds * 1000,
-  })
-
-  if (result?.exceptionDetails) {
-    throw new Error(`JS Error: ${result.exceptionDetails.exception?.description || result.exceptionDetails.text}`)
-  }
-
-  return result?.result?.value ?? null
+export async function toolEval({ tab_id, expression, await_promise = false, timeout_seconds = 30, session_id = '', context_id } = {}, signal) {
+  return withManagedTab(tab_id, async (_tab, send) => {
+    const result = await send('Runtime.evaluate', { expression, awaitPromise: !!await_promise,
+      returnByValue: true, timeout: Math.min(300, Math.max(1, timeout_seconds)) * 1000,
+      ...(context_id !== undefined ? {contextId: context_id} : {}) }, session_id)
+    if (result.exceptionDetails) throw new Error(`JS Error: ${result.exceptionDetails.exception?.description || result.exceptionDetails.text}`)
+    return result.result?.value ?? null
+  }, signal)
 }
 
-export async function toolScreenshot({ tab_id, format = 'png', quality = 80 } = {}) {
-  const id = Number(tab_id)
-  const tab = _managedTabs.get(id)
-  if (!tab) throw new Error(`Tab ${id} not found`)
-
-  if (!tab.isAttached) {
-    await _attachDebugger(id)
-    tab.isAttached = true
-  }
-
-  tab.lastActivity = Date.now()
-
-  const params = { format: format === 'jpeg' ? 'jpeg' : 'png' }
-  if (format === 'jpeg') params.quality = quality
-
-  const result = await chrome.debugger.sendCommand({ tabId: id }, 'Page.captureScreenshot', params)
-  const dataUrl = `data:image/${params.format};base64,${result.data}`
-
-  return { dataUrl, format: params.format, tabId: id }
+export async function toolScreenshot({ tab_id, format = 'png', quality = 80 } = {}, signal) {
+  return withManagedTab(tab_id, async (_tab, send) => {
+    const params = { format: format === 'jpeg' ? 'jpeg' : 'png' }
+    if (params.format === 'jpeg') params.quality = Math.min(100, Math.max(1, quality))
+    const result = await send('Page.captureScreenshot', params)
+    return { dataUrl: `data:image/${params.format};base64,${result.data}`, format: params.format, tabId: Number(tab_id) }
+  }, signal)
 }
 
-export async function toolCdp({ tab_id, method, params = {}, timeout = 30 } = {}) {
-  const id = Number(tab_id)
-  const tab = _managedTabs.get(id)
-  if (!tab) throw new Error(`Tab ${id} not found`)
-
-  if (!tab.isAttached) {
-    await _attachDebugger(id)
-    tab.isAttached = true
-  }
-
-  tab.lastActivity = Date.now()
-
-  const result = await chrome.debugger.sendCommand({ tabId: id }, method, params || {})
-  return result || {}
+export async function toolCdp({ tab_id, method, params = {}, session_id = '' } = {}, signal) {
+  return withManagedTab(tab_id, (_tab, send) => send(method, params || {}, session_id), signal)
 }
 
-export async function toolSleep({ seconds = 1 } = {}) {
+export async function toolSleep({ seconds = 1 } = {}, signal) {
   const ms = Math.max(0, Math.min(seconds, 300)) * 1000
-  await new Promise(r => setTimeout(r, ms))
+  await new Promise((resolve,reject)=>{
+    signal?.throwIfAborted()
+    const timer=setTimeout(()=>{signal?.removeEventListener('abort',abort);resolve()},ms)
+    const abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(new Error('Agent aborted'))}
+    signal?.addEventListener('abort',abort,{once:true})
+  })
   return { slept_seconds: ms / 1000 }
 }
 
@@ -239,7 +191,7 @@ export async function toolGetSkill({ id } = {}) {
  * Arbitrary HTTP fetch tool — runs in the extension background,
  * so it is NOT subject to CORS restrictions.
  */
-export async function toolFetch({ url, method = 'GET', headers = {}, body = null, timeout_seconds = 30 } = {}) {
+export async function toolFetch({ url, method = 'GET', headers = {}, body = null, timeout_seconds = 30 } = {}, signal) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeout_seconds * 1000)
 
@@ -247,7 +199,7 @@ export async function toolFetch({ url, method = 'GET', headers = {}, body = null
     const opts = {
       method: method.toUpperCase(),
       headers: headers || {},
-      signal: ctrl.signal,
+      signal: signal ? AbortSignal.any([signal,ctrl.signal]) : ctrl.signal,
     }
     if (body !== null && body !== undefined) {
       opts.body = typeof body === 'string' ? body : JSON.stringify(body)
@@ -276,6 +228,7 @@ export async function toolFetch({ url, method = 'GET', headers = {}, body = null
 // ─── Tool registry ─────────────────────────────────────────────────────────────
 
 export const TOOL_FUNCTIONS = {
+  ...BROWSER_TOOL_FUNCTIONS,
   create_tab:   toolCreateTab,
   list_tabs:    toolListTabs,
   get_tab:      toolGetTab,
@@ -292,6 +245,7 @@ export const TOOL_FUNCTIONS = {
 }
 
 export const TOOL_SCHEMAS = [
+  ...BROWSER_TOOL_SCHEMAS,
   {
     type: 'function',
     function: {
@@ -302,6 +256,7 @@ export const TOOL_SCHEMAS = [
         properties: {
           url:    { type: 'string',  description: 'URL to open (default: about:blank)' },
           active: { type: 'boolean', description: 'Bring tab to foreground (default: false — prefer background)' },
+          auto_close: { type: 'boolean', description: 'Close after idle timeout (default true, 30 minutes unless configured); false keeps an uploading tab open.' },
           meta:   { type: 'object',  description: 'Optional metadata' },
         },
       },
@@ -393,7 +348,7 @@ export const TOOL_SCHEMAS = [
     type: 'function',
     function: {
       name: 'cdp',
-      description: 'Send any Chrome DevTools Protocol command. Use for advanced operations like Input.dispatchKeyEvent, Network.getCookies, etc.',
+      description: 'Send a CDP command supported by chrome.debugger. Some domains/methods are restricted. Prefer the high-level browser tools.',
       parameters: {
         type: 'object',
         required: ['tab_id', 'method'],
@@ -401,6 +356,7 @@ export const TOOL_SCHEMAS = [
           tab_id:  { type: 'integer', description: 'Tab ID' },
           method:  { type: 'string',  description: 'CDP method name, e.g. Input.insertText' },
           params:  { type: 'object',  description: 'CDP method parameters' },
+          session_id: { type: 'string', description: 'Optional child session from list_frames' },
           timeout: { type: 'integer', description: 'Timeout in seconds (default: 30)' },
         },
       },
@@ -491,6 +447,13 @@ You MUST reply in the exact same language the user wrote in. This is non-negotia
 - Never switch languages mid-conversation unless the user does so first
 
 Available tools:
+- snapshot: Observe actual interactive elements and obtain unique element refs. Prefer this before actions.
+- click / fill / press / select_option / set_checked: Verified browser interactions. Prefer these over ad-hoc eval.
+- upload_files: Select files from absolute local paths; returns selected, NOT uploaded. Use wait_for to verify site progress, completion and processing. Never close an uploading/processing tab.
+- wait_for: Wait for explicit element, text, value or URL conditions. A timeout is a failure requiring diagnosis.
+- set_tab_policy: Set auto_close:false during long uploads or manual intervention, restore it after completion.
+- list_frames: Get frame execution contexts and child sessions; pass context_id/session_id to operate inside a frame.
+- handle_dialog: Handle an open JavaScript alert, confirm or prompt.
 - create_tab: Open a new Chrome tab (use active:false to keep it in the background)
 - list_tabs / get_tab / close_tab: Manage tabs
 - navigate: Go to a URL and wait for page load
@@ -560,8 +523,14 @@ Gotchas:
 3. For React/SPA inputs, use cdp Input.insertText (not innerHTML):
    - First focus the element with eval, then cdp Input.insertText.
 4. After every navigation, verify with eval('window.location.href').
-5. After finishing, close all tabs you opened.
+5. After finishing, close tabs you opened only after confirming uploads, processing and saves have completed. Keep tabs needed for user intervention open.
 6. If a task requires sending data externally, use the fetch tool.
+
+## Publishing and recovery
+- File selected, upload finished, processing finished, draft saved, scheduled, and published are distinct states.
+- Before reporting success, verify the requested state through the actual UI, content ID or URL. Include evidence in the final result. A successful click alone is not publication evidence.
+- If a submit/publish action times out or the connection drops, its outcome is unknown. Inspect the existing draft/content list before retrying; never blindly submit twice.
+- If login, a verification challenge, or a user decision is needed, preserve the tab and explain what is needed. Do not report the task complete.
 
 ## Stuck detection — MANDATORY
 

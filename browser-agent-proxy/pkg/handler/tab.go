@@ -33,9 +33,10 @@ func (h *TabHandler) CreateTab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		URL    string                 `json:"url"`
-		Active bool                   `json:"active"`
-		Meta   map[string]interface{} `json:"meta"`
+		URL       string                 `json:"url"`
+		Active    bool                   `json:"active"`
+		AutoClose *bool                  `json:"autoClose"`
+		Meta      map[string]interface{} `json:"meta"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", "INVALID_REQUEST")
@@ -46,9 +47,13 @@ func (h *TabHandler) CreateTab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := map[string]interface{}{
-		"url":    body.URL,
-		"active": body.Active,
-		"meta":   body.Meta,
+		"url":       body.URL,
+		"active":    body.Active,
+		"autoClose": true,
+		"meta":      body.Meta,
+	}
+	if body.AutoClose != nil {
+		params["autoClose"] = *body.AutoClose
 	}
 
 	result, err := h.hub.Send("tab.create", params, 30)
@@ -143,6 +148,38 @@ func (h *TabHandler) DeleteTab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.log.WithField("tabId", tabID).Info("[Tab] Tab closed via API")
+	writeSuccess(w, result)
+}
+
+// ReleaseTab POST /api/tabs/{tabId}/release removes a tab from proxy management
+// and detaches the debugger without closing the browser tab.
+func (h *TabHandler) ReleaseTab(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+
+	tabID, ok := extractTabID(w, r)
+	if !ok {
+		return
+	}
+	if !h.hub.IsConnected() {
+		writeError(w, http.StatusServiceUnavailable, "chrome extension not connected", "EXTENSION_NOT_CONNECTED")
+		return
+	}
+
+	result, err := h.hub.Send("tab.release", map[string]interface{}{"tabId": tabID}, 10)
+	if err != nil {
+		if isNotFoundError(err) {
+			writeError(w, http.StatusNotFound, err.Error(), "TAB_NOT_FOUND")
+			return
+		}
+		h.log.WithError(err).Error("[Tab] Release tab failed")
+		writeError(w, http.StatusInternalServerError, err.Error(), "RELEASE_TAB_FAILED")
+		return
+	}
+
+	h.log.WithField("tabId", tabID).Info("[Tab] Tab released without closing")
 	writeSuccess(w, result)
 }
 

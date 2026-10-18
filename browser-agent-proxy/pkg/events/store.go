@@ -6,10 +6,12 @@ import (
 )
 
 const defaultTTL = 3 * time.Minute
+const defaultCapacity = 10000
 
 // Event represents a single event pushed from the Chrome extension
 type Event struct {
 	TabID       int                    `json:"tabId"`
+	SessionID   string                 `json:"sessionId,omitempty"`
 	EventMethod string                 `json:"eventMethod"`
 	EventParams map[string]interface{} `json:"eventParams,omitempty"`
 	Timestamp   int64                  `json:"timestamp"` // Unix ms from extension
@@ -21,13 +23,16 @@ type Event struct {
 type Store struct {
 	mu     sync.Mutex
 	events []*Event
+	head   int
+	count  int
 	ttl    time.Duration
 }
 
 // NewStore creates a Store with the default 3-minute TTL.
 func NewStore() *Store {
 	s := &Store{
-		ttl: defaultTTL,
+		ttl:    defaultTTL,
+		events: make([]*Event, defaultCapacity),
 	}
 	go s.runGC()
 	return s
@@ -37,7 +42,16 @@ func NewStore() *Store {
 func (s *Store) Append(ev *Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, ev)
+	if len(s.events) == 0 {
+		return
+	}
+	if s.count == len(s.events) {
+		s.events[s.head] = ev
+		s.head = (s.head + 1) % len(s.events)
+	} else {
+		s.events[(s.head+s.count)%len(s.events)] = ev
+		s.count++
+	}
 }
 
 // QueryFilter holds all filter criteria for Store.Query.
@@ -55,7 +69,8 @@ func (s *Store) Query(f QueryFilter) []*Event {
 	cutoff := time.Now().Add(-s.ttl)
 	result := make([]*Event, 0)
 
-	for _, ev := range s.events {
+	for i := 0; i < s.count; i++ {
+		ev := s.events[(s.head+i)%len(s.events)]
 		if ev.ReceivedAt.Before(cutoff) {
 			continue
 		}
@@ -103,16 +118,17 @@ func (s *Store) gc() {
 	defer s.mu.Unlock()
 
 	cutoff := time.Now().Add(-s.ttl)
-	i := 0
-	for _, ev := range s.events {
+	kept := 0
+	for i := 0; i < s.count; i++ {
+		ev := s.events[(s.head+i)%len(s.events)]
 		if ev.ReceivedAt.After(cutoff) {
-			s.events[i] = ev
-			i++
+			s.events[(s.head+kept)%len(s.events)] = ev
+			kept++
 		}
 	}
-	removed := len(s.events) - i
-	s.events = s.events[:i]
-	if removed > 0 {
-		_ = removed // available for logging if needed
+	// Clear references, including large network payloads, after eviction.
+	for i := kept; i < s.count; i++ {
+		s.events[(s.head+i)%len(s.events)] = nil
 	}
+	s.count = kept
 }

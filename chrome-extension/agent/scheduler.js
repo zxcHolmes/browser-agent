@@ -153,7 +153,7 @@ export function createRunId() {
 // Skill schema:
 // {
 //   id: string,
-//   name: string,          // short human-readable name, e.g. "发表推文"
+//   name: string,          // short human-readable name, e.g. "Post a tweet"
 //   site: string,          // optional domain hint, e.g. "twitter.com"
 //   description: string,   // natural-language step-by-step description + key selectors
 //   createdAt: number,

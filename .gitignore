@@ -1,5 +1,6 @@
-# Binaries
+# Binaries (go build output)
 browser-agent-proxy/browser-agent-proxy
+browser-agent-proxy/main
 browser-agent-proxy/*.exe
 
 # Go build cache
@@ -21,6 +22,10 @@ env/
 dist/
 build/
 .pytest_cache/
+
+# Local working notes (not part of the project)
+TODO.md
+TEST_REPORT.md
 
 # Env / secrets
 .env

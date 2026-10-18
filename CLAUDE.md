@@ -46,6 +46,7 @@ Playwright/Puppeteer require Chrome launched with `--remote-debugging-port`. The
   url: string,
   title: string,
   meta: object,         // caller-supplied arbitrary metadata
+  autoClose: boolean,   // false keeps the API-created tab open when idle
   isAttached: boolean,
   lastActivity: number, // Unix ms — refreshed on every cdp.send or debugger event
   createdAt: number,
@@ -54,10 +55,11 @@ Playwright/Puppeteer require Chrome launched with `--remote-debugging-port`. The
 
 ### Tab Idle Timeout
 
-- Default: **1 minute** of inactivity → tab is closed (detach + `chrome.tabs.remove`)
+- Default: **30 minutes** of inactivity → tab is closed (detach + `chrome.tabs.remove`)
 - Checked every 5 s via `setInterval`
 - Configurable via `tabTimeoutMinutes` in `chrome.storage.local`
-- Applies to both Agent-opened tabs and Browser Agent Proxy-opened tabs
+- Applies to Agent-opened tabs and Browser Agent Proxy-opened tabs unless the
+  caller creates a tab with `autoClose: false`
 
 ### CDP Command Forwarding
 
@@ -141,6 +143,7 @@ Session {
 ```
 
 System events (non-CDP): `tab.closed` (reason: `"timeout"|"api"|"user"`), `debugger.detached`
+and `tab.released` when proxy management ends without closing the page.
 
 ### Heartbeat
 ```
@@ -152,10 +155,11 @@ Extension → Server: { "method": "pong" }
 
 | method | params | description |
 |--------|--------|-------------|
-| `tab.create` | url, active, meta | Create a tab |
+| `tab.create` | url, active, autoClose, meta | Create a tab (`autoClose` defaults to true) |
 | `tab.list` | — | List managed tabs |
 | `tab.get` | tabId | Get single tab |
 | `tab.close` | tabId | Close a tab |
+| `tab.release` | tabId | Detach and stop managing without closing the tab |
 | `cdp.send` | tabId, method, params | Forward CDP command |
 
 ---
@@ -191,6 +195,7 @@ background.js                 Service worker: tab registry, relay bridge, sessio
 chat.html / chat.js           Chat UI — session model, event replay, polling (500 ms)
 options.html / options.js     Settings: LLM, tasks, history, system prompt, tab timeout
 agent/
+├── browser-actions.js        Shared semantic actions: snapshot, click, fill, wait, upload, frames
 ├── tools.js                  Tool implementations + TOOL_SCHEMAS + SYSTEM_PROMPT
 ├── llm.js                    OpenAI-compatible client, trimMessages, loadLLMConfig
 ├── runner.js                 Agent loop: dispatchTool → {resultStr, dataUrl}, tool-call limit
@@ -298,6 +303,8 @@ The extension service worker is single-threaded — all commands execute seriall
 - **[API.md](./API.md)** — Full REST API reference
 - **[CLAUDE.md](./CLAUDE.md)** — This file, architecture notes for AI assistants
 - **[cli/agent.py](./cli/agent.py)** — Legacy Python CLI agent
+- **[cli/YOUTUBE.md](./cli/YOUTUBE.md)** — YouTube upload CLI and the shared CLI modules (`browser_client`, `automation`, `media`, `page_workflow`, `assets/dom_helpers.js`)
+- **[TESTING.md](./TESTING.md)** — Test suites and how to run them
 
 ---
 

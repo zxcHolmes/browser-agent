@@ -448,7 +448,7 @@ async function relayDispatch(method, params, signal) {
       return { result }
     }
     case 'browser.capabilities':
-      return {protocolVersion:2,implementationRevision:9,navigationTracking:!!chrome.webNavigation?.onCreatedNavigationTarget,actions:ACTION_NAMES,defaultIdleTimeoutMinutes:TAB_TIMEOUT_MS/60000,managedTabsOnly:true}
+      return {protocolVersion:2,implementationRevision:10,navigationTracking:!!chrome.webNavigation?.onCreatedNavigationTarget,actions:ACTION_NAMES,defaultIdleTimeoutMinutes:TAB_TIMEOUT_MS/60000,managedTabsOnly:true}
     case 'browser.action': {
       const result=await browserAction(params.action,{...(params.args || {}),tab_id:params.tabId},signal)
       persistManagedTabs()

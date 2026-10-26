@@ -144,15 +144,25 @@ class PageWorkflow:
         self.observe(probe)
         return probe
 
-    def poll(self, predicate, timeout, code, message):
+    def poll(self, predicate, timeout, code, message, *, stable_for=0):
+        """Wait for a read-only condition, optionally requiring it to hold across
+        observations for stable_for seconds (e.g. a form's debounced updates).
+        A failed read or false observation restarts the stability interval.
+        """
         deadline = self.clock() + timeout
         last_error = None
+        matched_since = None
         while self.clock() < deadline:
             try:
                 probe = self.probe()
                 result = predicate(probe)
                 if result:
-                    return probe
+                    if matched_since is None:
+                        matched_since = self.clock()
+                    if self.clock() - matched_since >= stable_for:
+                        return probe
+                else:
+                    matched_since = None
                 progress = probe.get('progress', '')
                 if progress and progress != self.last_log:
                     log('  ' + progress[:500], self.quiet)
@@ -161,9 +171,11 @@ class PageWorkflow:
             except AutomationError as error:
                 if error.code != 'PAGE_NOT_READY':
                     raise
+                matched_since = None
                 last_error = str(error)
             except (APIError, TransportError) as error:
                 # Only this read-only probe is retried. No click/file selection is replayed.
+                matched_since = None
                 last_error = str(error)
                 if isinstance(error, APIError) and error.status == 404:
                     raise
@@ -181,7 +193,8 @@ class PageWorkflow:
         try:
             for attempt in range(attempts):
                 try:
-                    result = self.client.action(self.tab_id, action, **args)
+                    result = (self.client.cdp(self.tab_id, **args) if action == 'cdp.send'
+                              else self.client.action(self.tab_id, action, **args))
                     break
                 except APIError as error:
                     if not (error.reason in self.TRANSIENT_REFUSALS and attempt < attempts - 1):

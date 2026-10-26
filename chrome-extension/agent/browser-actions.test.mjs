@@ -158,3 +158,30 @@ test('insert_text reports text that did not land',async()=>{
     ?{result:{value:++evaluated===1?{ref:'r1',rich:false,before:''}:{value:'something else'}}}:{})
   await assert.rejects(browserAction('insert_text',{tab_id:1,target:'textarea',value:'#tag'}),/INSERT_VERIFICATION_FAILED/)
 })
+
+test('Slate fill tolerates its empty and end-of-line caret placeholders',async()=>{
+  let reads=0
+  const typed=[], enters=[]
+  setup(async(_target,method,args)=>{
+    if(method==='Runtime.evaluate') return {result:{value:++reads===1
+      ? {ref:'slate',rich:true,slate:true}
+      : {value: reads<=3 ? '\u200b' : '第一行\u200b\n第二行\u200b'}}}
+    if(method==='Input.insertText')typed.push(args.text)
+    if(method==='Input.dispatchKeyEvent' && args.key==='Enter')enters.push(args.type)
+    return {}
+  })
+  assert.equal((await browserAction('fill',{tab_id:1,target:'[data-slate-editor]',value:'第一行\n第二行'})).filled,true)
+  assert.deepEqual(typed,['第一行','第二行'])
+  assert.deepEqual(enters,['keyDown','keyUp'])
+})
+
+test('Slate append tolerates placeholders but plain fields retain zero-width semantics',async()=>{
+  for(const slate of [true,false]) {
+    let reads=0
+    setup(async(_target,method)=>method==='Runtime.evaluate'?{result:{value:++reads===1
+      ? {ref:'text',rich:true,slate,before:'Hello\u200b'} : {value:'Hello\u200b world\u200b'}}}:{})
+    const action=browserAction('insert_text',{tab_id:1,target:'[contenteditable]',value:' world'})
+    if(slate) assert.equal((await action).inserted,true)
+    else await assert.rejects(action,/INSERT_VERIFICATION_FAILED/)
+  }
+})

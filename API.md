@@ -468,3 +468,7 @@ Go-request and client-read deadlines.
 ## Platform workflow CLIs
 
 [cli/tiktok/README.md](cli/tiktok/README.md) documents `cli/tiktok`: TikTok videos posted or saved as drafts through TikTok Studio, with real hashtags, visibility, the AI-generated label, recent posts/drafts and duplicate checks. [cli/twitter/README.md](cli/twitter/README.md) documents `cli/twitter`: posts on X with text, up to four images, a GIF or a video, a recent-posts listing and duplicate checks, and resumable jobs that never press Post twice. [cli/youtube/README.md](cli/youtube/README.md) documents `cli/youtube`: upload from a local path or a direct URL, title/description as strings or text files, draft or immediate publish, thumbnails, duplicate checks, and resumable job state. It talks to this API on port 12345 by default. The shared Python client and workflow modules are in [cli/common](cli/common/README.md).
+
+[cli/douyin/README.md](cli/douyin/README.md) documents the China Douyin CLI: video upload, local browser drafts, publishing with browser response verification, resumable state and structured errors. It requires extension revision 10 and defaults to port 12345.
+
+Video Channels (WeChat) automation and native scheduled publication are documented in [cli/wechat_channels](cli/wechat_channels/README.md). Douyin supports `post --schedule-at` and `recent`; [the publication-plan runner](cli/PUBLISHING.md) reconciles backend rows before scheduling one next episode per platform and persists each confirmed result.

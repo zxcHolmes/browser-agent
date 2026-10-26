@@ -134,3 +134,11 @@ npx skills add zxcHolmes/browser-agent
 - **[cli/common/README.md](cli/common/README.md)** — shared modules for site CLIs and how to add a platform
 - **[TESTING.md](TESTING.md)** — test suites and what they cover
 - **[CLAUDE.md](CLAUDE.md)** — architecture and design notes (also linked as `AGENTS.md` for AI coding agents)
+
+### Douyin (China) CLI
+
+[`cli/douyin`](cli/douyin/README.md) supports video uploads, browser-local drafts, immediate or scheduled publication, content lists, and resumable jobs. The default proxy port is 12345; extension 2.1.6 (revision 10) is required. Run `python -m cli.douyin --help` for usage.
+
+### WeChat Channels and publication plans
+
+[`cli/wechat_channels`](cli/wechat_channels/README.md) supports uploads, publication, native scheduling, and content lists. [`cli.publish_plan`](cli/PUBLISHING.md) reads an explicitly supplied plan, reconciles complete platform lists, schedules episodes, and saves each confirmed result. It does not install background tasks.

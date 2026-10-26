@@ -184,13 +184,13 @@ function pageOperation(op, args) {
     if (op === 'prepare_insert') {
       // The caret of a rich editor is moved by a trusted keystroke afterwards.
       if (!e.isContentEditable) { try { e.setSelectionRange(e.value.length,e.value.length) } catch { throw new Error('INPUT_TYPE_REQUIRES_SPECIALIZED_FILL') } }
-      return {ref:ref(e),rich:e.isContentEditable,before:value(e)}
+      return {ref:ref(e),rich:e.isContentEditable,slate:e.matches('[data-slate-editor="true"]'),before:value(e)}
     }
     if (e.isContentEditable) {
       const range = doc.createRange();range.selectNodeContents(e)
       const selection = win.getSelection();selection.removeAllRanges();selection.addRange(range)
     } else { try { e.select() } catch { throw new Error('INPUT_TYPE_REQUIRES_SPECIALIZED_FILL') } }
-    return {ref:ref(e),rich:e.isContentEditable}
+    return {ref:ref(e),rich:e.isContentEditable,slate:e.matches('[data-slate-editor="true"]')}
   }
   if (op === 'focus') { e.focus();return {ref:ref(e)} }
   if (op === 'prepare_click') {
@@ -343,16 +343,32 @@ export async function browserAction(action, args = {}, signal) {
       await send('Input.dispatchKeyEvent',{...params,type:'keyUp'},sessionId)
       return {pressed:args.key}
     }
+    // Slate serializes browser-created paragraphs correctly only when line breaks
+    // arrive as trusted Enter events; inserting a literal LF can display correctly
+    // but save a different caption. Other editors retain their existing behavior.
+    const insertEditorText=async(text, slate)=>{
+      if (!slate) { await send('Input.insertText',{text},sessionId); return }
+      const lines=text.replace(/\r\n/g,'\n').split('\n')
+      for (let i=0;i<lines.length;i++) {
+        if (i) {
+          await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'},sessionId)
+          await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13},sessionId)
+        }
+        if (lines[i]) await send('Input.insertText',{text:lines[i]},sessionId)
+      }
+    }
     if (action === 'insert_text') {
       if (typeof args.value !== 'string' || !args.value) throw new Error('value must be a non-empty string')
       const prepared=await evaluate('prepare_insert')
-      const normalize=s=>String(s).replace(/\r\n/g,'\n').replace(/\n+$/,'')
+      // Slate inserts U+200B caret placeholders, including at the end of non-empty lines.
+      // Scope this to Slate; ordinary inputs must preserve intentional zero-width text.
+      const normalize=s=>(prepared.slate ? String(s).replace(/\u200b/g,'') : String(s)).replace(/\r\n/g,'\n').replace(/\n+$/,'')
       if (prepared.rich) {
         // Editor frameworks follow trusted caret movement, not a DOM range.
         await send('Input.dispatchKeyEvent',{type:'keyDown',key:'End',code:'End',windowsVirtualKeyCode:35,commands:['moveToEndOfDocument']},sessionId)
         await send('Input.dispatchKeyEvent',{type:'keyUp',key:'End',code:'End',windowsVirtualKeyCode:35},sessionId)
       }
-      await send('Input.insertText',{text:args.value},sessionId)
+      await insertEditorText(args.value,prepared.slate)
       const result=await evaluate('value',{target:{ref:prepared.ref}})
       if (result.value !== '[redacted]' && !normalize(result.value).endsWith(normalize(args.value)))
         throw new Error(`INSERT_VERIFICATION_FAILED: ${JSON.stringify({value:String(result.value).slice(-200)})}`)
@@ -363,7 +379,9 @@ export async function browserAction(action, args = {}, signal) {
       const prepared=await evaluate('prepare_fill')
       // Rich editors (YouTube's description box) render multi-line text with a
       // trailing newline of their own; it is not part of the value.
-      const normalize=s=>String(s).replace(/\r\n/g,'\n').replace(/\n+$/,'')
+      // Slate inserts U+200B caret placeholders, including at the end of non-empty lines.
+      // Scope this to Slate; ordinary inputs must preserve intentional zero-width text.
+      const normalize=s=>(prepared.slate ? String(s).replace(/\u200b/g,'') : String(s)).replace(/\r\n/g,'\n').replace(/\n+$/,'')
       const backspace=async()=>{
         await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8},sessionId)
         await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8},sessionId)
@@ -383,7 +401,7 @@ export async function browserAction(action, args = {}, signal) {
         const left=(await evaluate('value',{target:{ref:prepared.ref}})).value
         if (normalize(left)) throw new Error(`FILL_CLEAR_FAILED: ${JSON.stringify({value:String(left).slice(0,200)})}`)
       }
-      if (args.value) await send('Input.insertText',{text:args.value},sessionId)
+      if (args.value) await insertEditorText(args.value,prepared.slate)
       const result=await evaluate('value',{target:{ref:prepared.ref}})
       if (result.value !== '[redacted]' && normalize(result.value)!==normalize(args.value)) throw new Error(`FILL_VERIFICATION_FAILED: ${JSON.stringify(result)}`)
       return {filled:true,...result}

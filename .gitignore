@@ -53,3 +53,16 @@ cli/agent.log
 *.crx
 *.pem
 chrome-extension/icons/*.png.tmp
+
+# Private publication plans and generated job state
+publishing-plan.json
+publishing-plan.json.lock
+PUBLISHING_PLAN.md
+publishing-jobs/
+
+# Local-only files and private project material
+.local/
+private/
+.env.*
+!.env.example
+!.env.sample

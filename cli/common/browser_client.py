@@ -7,6 +7,7 @@ import socket
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 
 BASE = "http://127.0.0.1:12345"
 
@@ -92,6 +93,15 @@ class BrowserClient:
 
     def tabs(self):
         return self.request('/api/tabs')['tabs']
+
+    def events(self, tab_id, *, since, methods=()):
+        """Read recent events by Go receive time (Unix ms), without replaying actions.
+
+        Only the proxy's retention window is available; this is not durable history.
+        """
+        query = [('tabId', tab_id), ('since', since)]
+        query.extend(('method', method) for method in methods)
+        return self.request('/api/events?' + urlencode(query))['events']
 
     def tab(self, tab_id):
         return self.request(f'/api/tabs/{tab_id}')['tab']

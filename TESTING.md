@@ -51,3 +51,15 @@ After changing the extension, reload it in `chrome://extensions` and check `GET 
 - Mutating actions are never retried automatically: a timeout or dropped connection can leave the outcome unknown, so inspect the site's state (draft or content list) before retrying.
 - `chrome.storage.session` does not survive a browser restart or an extension reload, so managed tabs are not recovered across either; workflows such as the YouTube CLI recover through their own persisted state instead.
 - Live-site coverage of the site CLIs is described in [cli/youtube/README.md](cli/youtube/README.md#compatibility-and-known-limits) [cli/twitter/README.md](cli/twitter/README.md#known-limits) and [cli/tiktok/README.md](cli/tiktok/README.md#known-limits).
+
+## Douyin CLI
+
+Run `python -m unittest cli.douyin.tests.test_douyin -v`. Covers validation, draft persistence verification, existing-draft protection, login/challenge/account errors, uncertain mutation outcomes, single submission, and publish response validation. Shared Slate input regression tests live in `chrome-extension/agent/browser-actions.test.mjs`; run `node --test chrome-extension/agent/browser-actions.test.mjs`. Live platform coverage is documented in `cli/douyin/README.md`.
+
+## Scheduled publication and WeChat Channels
+
+Run `python -m unittest cli.douyin.tests.test_douyin cli.wechat_channels.tests.test_wechat -v`. Covers schedule lead times/timezones, controlled date inputs, WeChat short-title rules, its actual future-publication label, uncertain-intent recovery and plan reconciliation.
+
+Batch plan regression tests: `python -m unittest discover -s cli/tests -v`. Covers two daily slots, occupied slots, lead-time rollover, submission counts, and stopping a platform after an unverified result. WeChat tests also cover pagination across all rows and normalization of platform-rejected corner quotes.
+
+Publication list tests: `python -m unittest discover -s cli/tests -v`. Covers lazy-loaded 42-item lists, caption/platform-status separation, metrics-independent item identity, truthful truncation flags and native scheduling-window stop before upload. WeChat tests cover expired `/login.html` redirects.

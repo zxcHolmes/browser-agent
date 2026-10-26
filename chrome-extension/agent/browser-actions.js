@@ -155,7 +155,21 @@ function pageOperation(op, args) {
   }
   const e = find()
   if (op === 'files') return {files:[...(e.files || [])].map(f=>({name:f.name,size:f.size,type:f.type,lastModified:f.lastModified}))}
-  if (op === 'value') return {value:value(e)}
+  if (op === 'value') {
+    if (e.type==='password') return {value:'[redacted]'}
+    let caretText
+    if (args.caret) {
+      if (e.isContentEditable) {
+        const selection=win.getSelection()
+        if (selection?.rangeCount && e.contains(selection.anchorNode) && e.contains(selection.focusNode)) {
+          const range=selection.getRangeAt(0).cloneRange()
+          range.selectNodeContents(e);range.setEnd(selection.focusNode,selection.focusOffset)
+          caretText=range.toString()
+        }
+      } else caretText=e.value.slice(0,e.selectionEnd)
+    }
+    return {value:value(e),...(args.caret?{caretText}: {})}
+  }
   if (op === 'file_node') {
     if (e.tagName !== 'INPUT' || e.type !== 'file') throw new Error('NOT_FILE_INPUT')
     if (args.count > 1 && !e.multiple) throw new Error('INPUT_DOES_NOT_ALLOW_MULTIPLE_FILES')
@@ -180,10 +194,14 @@ function pageOperation(op, args) {
     if ((!e.isContentEditable && !['INPUT','TEXTAREA'].includes(e.tagName)) ||
       ['file','checkbox','radio','button','submit','range','color','date','time','datetime-local'].includes(e.type)) throw new Error('NOT_TEXT_EDITABLE')
     if (e.readOnly) throw new Error('ELEMENT_READONLY')
+    if (op === 'prepare_insert' && args.position==='caret' && e.isContentEditable) {
+        const selection=win.getSelection()
+        if (!selection?.rangeCount || !e.contains(selection.anchorNode) || !e.contains(selection.focusNode)) throw new Error('CARET_OUTSIDE_TARGET')
+    }
     e.focus()
     if (op === 'prepare_insert') {
-      // The caret of a rich editor is moved by a trusted keystroke afterwards.
-      if (!e.isContentEditable) { try { e.setSelectionRange(e.value.length,e.value.length) } catch { throw new Error('INPUT_TYPE_REQUIRES_SPECIALIZED_FILL') } }
+      // The default append mode moves the caret with a trusted key afterwards.
+      if (!e.isContentEditable && args.position!=='caret') { try { e.setSelectionRange(e.value.length,e.value.length) } catch { throw new Error('INPUT_TYPE_REQUIRES_SPECIALIZED_FILL') } }
       return {ref:ref(e),rich:e.isContentEditable,slate:e.matches('[data-slate-editor="true"]'),before:value(e)}
     }
     if (e.isContentEditable) {
@@ -359,18 +377,20 @@ export async function browserAction(action, args = {}, signal) {
     }
     if (action === 'insert_text') {
       if (typeof args.value !== 'string' || !args.value) throw new Error('value must be a non-empty string')
+      if (args.position!==undefined && !['end','caret'].includes(args.position)) throw new Error('position must be end or caret')
       const prepared=await evaluate('prepare_insert')
       // Slate inserts U+200B caret placeholders, including at the end of non-empty lines.
       // Scope this to Slate; ordinary inputs must preserve intentional zero-width text.
       const normalize=s=>(prepared.slate ? String(s).replace(/\u200b/g,'') : String(s)).replace(/\r\n/g,'\n').replace(/\n+$/,'')
-      if (prepared.rich) {
+      if (prepared.rich && args.position!=='caret') {
         // Editor frameworks follow trusted caret movement, not a DOM range.
         await send('Input.dispatchKeyEvent',{type:'keyDown',key:'End',code:'End',windowsVirtualKeyCode:35,commands:['moveToEndOfDocument']},sessionId)
         await send('Input.dispatchKeyEvent',{type:'keyUp',key:'End',code:'End',windowsVirtualKeyCode:35},sessionId)
       }
       await insertEditorText(args.value,prepared.slate)
-      const result=await evaluate('value',{target:{ref:prepared.ref}})
-      if (result.value !== '[redacted]' && !normalize(result.value).endsWith(normalize(args.value)))
+      const result=await evaluate('value',{target:{ref:prepared.ref},caret:args.position==='caret'})
+      const inserted=args.position==='caret'?result.caretText:result.value
+      if (result.value !== '[redacted]' && (typeof inserted!=='string' || !normalize(inserted).endsWith(normalize(args.value))))
         throw new Error(`INSERT_VERIFICATION_FAILED: ${JSON.stringify({value:String(result.value).slice(-200)})}`)
       return {inserted:true,...result}
     }
@@ -430,7 +450,7 @@ const definitions={
   snapshot:['Observe page text and interactive elements, including open Shadow DOM. Returns refs; refresh snapshot after navigation.',[],{limit:{type:'integer'}}],
   click:['Click a unique visible enabled unobscured element through browser mouse input. Verify the resulting page state.',['target'],{}],
   fill:['Replace input, textarea, or contenteditable text through browser input events, then verify the value.',['target','value'],{value:{type:'string'}}],
-  insert_text:['Append text at the end of an input, textarea or contenteditable through browser input events (no clearing), then verify it.',['target','value'],{value:{type:'string'}}],
+  insert_text:['Insert text through browser input events without clearing; position defaults to end, or use caret after placing the cursor. Verify the insertion.',['target','value'],{value:{type:'string'},position:{type:'string',enum:['end','caret']}}],
   press:['Send a key such as Enter, Tab, Escape, Control+a, Meta+a. Optional target receives focus.',['key'],{key:{type:'string'}}],
   select_option:['Select native dropdown option values and emit input/change events.',['target','values'],{values:{type:'array',items:{type:'string'}}}],
   set_checked:['Set a native checkbox/radio checked state and verify it.',['target','checked'],{checked:{type:'boolean'}}],

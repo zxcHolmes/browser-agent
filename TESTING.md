@@ -63,3 +63,12 @@ Run `python -m unittest cli.douyin.tests.test_douyin cli.wechat_channels.tests.t
 Batch plan regression tests: `python -m unittest discover -s cli/tests -v`. Covers two daily slots, occupied slots, lead-time rollover, submission counts, and stopping a platform after an unverified result. WeChat tests also cover pagination across all rows and normalization of platform-rejected corner quotes.
 
 Publication list tests: `python -m unittest discover -s cli/tests -v`. Covers lazy-loaded 42-item lists, caption/platform-status separation, metrics-independent item identity, truthful truncation flags and native scheduling-window stop before upload. WeChat tests cover expired `/login.html` redirects.
+
+## Medium, LinkedIn, and Facebook
+
+```bash
+python -m unittest cli.medium.tests.test_medium cli.linkedin.tests.test_linkedin cli.facebook.tests.test_facebook -v
+node --test chrome-extension/agent/browser-actions.test.mjs
+```
+
+Synthetic tests cover Markdown image ordering and local path resolution, unsupported input rejection, publication-intent recovery, pre-input refusals, account mismatch, existing-draft protection, changed attachments, and saved-draft verification. Extension tests cover caret insertion without moving to the end and refusal of missing caret evidence. Account-specific snapshots, live task states, and screenshots are kept outside the repository. Live validation details and feature limits are documented in each platform README.

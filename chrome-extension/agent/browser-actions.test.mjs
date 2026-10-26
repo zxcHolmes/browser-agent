@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import vm from 'node:vm'
 import { browserAction, configureBrowserActions, withManagedTab } from './browser-actions.js'
 import { setTabRegistry } from './tools.js'
 import { runAgent } from './runner.js'
@@ -184,4 +185,55 @@ test('Slate append tolerates placeholders but plain fields retain zero-width sem
     if(slate) assert.equal((await action).inserted,true)
     else await assert.rejects(action,/INSERT_VERIFICATION_FAILED/)
   }
+})
+
+test('caret insertion verifies text before the cursor without moving to the end',async()=>{
+  let reads=0
+  const keys=[]
+  setup(async(_target,method,args)=>{
+    if(method==='Runtime.evaluate')return {result:{value:++reads===1
+      ?{ref:'paragraph',rich:true,before:'before after'}
+      :{value:'before inserted after',caretText:'before inserted'}}}
+    if(method==='Input.dispatchKeyEvent')keys.push(args.key)
+    return {}
+  })
+  assert.equal((await browserAction('insert_text',{tab_id:1,target:'[contenteditable]',value:'inserted',position:'caret'})).inserted,true)
+  assert.deepEqual(keys,[])
+})
+
+test('caret insertion rejects missing caret evidence and invalid positions',async()=>{
+  let reads=0,insertions=0
+  setup(async(_target,method)=>{
+    if(method==='Runtime.evaluate')return {result:{value:++reads===1?{ref:'paragraph',rich:true}:{value:'text elsewhere'}}}
+    if(method==='Input.insertText')insertions++
+    return {}
+  })
+  await assert.rejects(browserAction('insert_text',{tab_id:1,target:'[contenteditable]',value:'text',position:'elsewhere'}),/position must/)
+  assert.equal(insertions,0)
+  await assert.rejects(browserAction('insert_text',{tab_id:1,target:'[contenteditable]',value:'text',position:'caret'}),/INSERT_VERIFICATION_FAILED/)
+})
+
+
+test('caret verification preserves password redaction in actual page operations',async()=>{
+  const input={tagName:'INPUT',type:'password',value:'fixture-secret',selectionStart:7,selectionEnd:7,
+    isContentEditable:false,isConnected:true,readOnly:false,
+    getAttribute:()=>null,closest:()=>null,scrollIntoView:()=>{},focus:()=>{},
+    getBoundingClientRect:()=>({width:100,height:20}),
+    matches:s=>s==='#fixture-password',
+    setSelectionRange(start,end){this.selectionStart=start;this.selectionEnd=end}}
+  const document={querySelectorAll:()=>[input],defaultView:{getComputedStyle:()=>({display:'block',visibility:'visible'})}}
+  const context=vm.createContext({document})
+  setup(async(_target,method,args)=>{
+    if(method==='Runtime.evaluate')return {result:{value:vm.runInContext(args.expression,context)}}
+    if(method==='Input.insertText'){
+      input.value=input.value.slice(0,input.selectionStart)+args.text+input.value.slice(input.selectionEnd)
+      input.selectionStart+=args.text.length;input.selectionEnd=input.selectionStart
+    }
+    return {}
+  })
+  const result=await browserAction('insert_text',{tab_id:1,target:'#fixture-password',value:'new',position:'caret'})
+  assert.equal(result.value,'[redacted]')
+  assert.equal(result.caretText,undefined)
+  assert.equal(JSON.stringify(result).includes('fixture-secret'),false)
+  assert.equal(input.value,'fixturenew-secret')
 })

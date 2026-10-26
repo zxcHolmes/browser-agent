@@ -66,22 +66,22 @@ $ python3 cli/agent.py "Open Hacker News and return the top 5 story titles"
 
 [agent] iteration 1 — calling model...
   [tool call] create_tab({"url": "https://news.ycombinator.com/"})
-  [tool result] {"tabId": 988465209, "isAttached": true, ...}
+  [tool result] {"tabId": 123, "isAttached": true, ...}
 
 [agent] iteration 2 — calling model...
-  [tool call] eval({"expression": "Array.from(document.querySelectorAll('.titleline > a')).slice(0, 5).map(a => a.innerText)", "tab_id": 988465209})
+  [tool call] eval({"expression": "Array.from(document.querySelectorAll('.titleline > a')).slice(0, 5).map(a => a.innerText)", "tab_id": 123})
   [tool result] []
 
 [agent] iteration 3 — calling model...
-  [tool call] screenshot({"tab_id": 988465209})
-  [tool result] {"path": "/tmp/tab988465209.png", "size_bytes": 532916}
+  [tool call] screenshot({"tab_id": 123})
+  [tool result] {"path": "/tmp/tab123.png", "size_bytes": 532916}
 
 [agent] iteration 4 — calling model...
-  [tool call] read_image({"path": "/tmp/tab988465209.png"})
+  [tool call] read_image({"path": "/tmp/tab123.png"})
   [tool result] {"ok": true, "injected": true}
 
 [agent] iteration 5 — calling model...
-  [tool call] eval({"expression": "Array.from(document.querySelectorAll('.titleline > a')).slice(0, 5).map(a => a.innerText)", "tab_id": 988465209})
+  [tool call] eval({"expression": "Array.from(document.querySelectorAll('.titleline > a')).slice(0, 5).map(a => a.innerText)", "tab_id": 123})
   [tool result] ["Darkbloom – Private inference on idle Macs", "Stop Using Ollama", "IPv6 traffic crosses the 50% mark", ...]
 
 [agent] iteration 6 — calling model...
@@ -142,3 +142,7 @@ npx skills add zxcHolmes/browser-agent
 ### WeChat Channels and publication plans
 
 [`cli/wechat_channels`](cli/wechat_channels/README.md) supports uploads, publication, native scheduling, and content lists. [`cli.publish_plan`](cli/PUBLISHING.md) reads an explicitly supplied plan, reconciles complete platform lists, schedules episodes, and saves each confirmed result. It does not install background tasks.
+
+### Medium, LinkedIn, and Facebook
+
+Browser-only CLIs reuse your signed-in Chrome session without platform API keys or OAuth applications: [Medium](cli/medium/README.md) composes Markdown articles with interleaved local images; [LinkedIn](cli/linkedin/README.md) and [Facebook](cli/facebook/README.md) compose text/image posts. Commands include account checks, editor previews, verified drafts where supported, publication, bounded recent lists, task status, and recovery. Medium requires extension 2.1.7 (revision 11) for caret-aware text insertion. Runtime account data and job artifacts stay in private local state.

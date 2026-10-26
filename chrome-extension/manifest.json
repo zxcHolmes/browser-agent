@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Agent",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "AI-powered browser automation agent. Run scheduled tasks, scrape data, and automate workflows directly in Chrome.",
   "icons": {
     "16": "icons/icon16.png",

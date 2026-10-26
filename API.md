@@ -2,7 +2,7 @@
 
 Control normal Chrome through a local Go server and the Browser Agent extension.
 No remote-debugging launch flags are required. This reference describes protocol
-2 and extension 2.1.5 (implementation revision 9).
+2 and extension 2.1.7 (implementation revision 11).
 
 Base URL: `http://127.0.0.1:12345`.
 
@@ -29,7 +29,7 @@ Check the **loaded** capabilities instead of inferring them from files on disk:
   "success": true,
   "data": {
     "protocolVersion": 2,
-    "implementationRevision": 9,
+    "implementationRevision": 11,
     "navigationTracking": true,
     "managedTabsOnly": true,
     "defaultIdleTimeoutMinutes": 30,
@@ -159,7 +159,7 @@ without the raw CDP `result` wrapper.
 | `snapshot` | Optional `limit` (default 200, max 500) | URL/title, up to 12,000 chars of body text and interactive elements |
 | `click` | `target` | Scroll, check visibility/enabled/occlusion, dispatch browser mouse input; returns `clicked:true`, `ref` |
 | `fill` | `target`, string `value` | Replace input/textarea/contenteditable through input events and verify value; rich editors (Draft.js, ProseMirror, Lexical) are cleared with a trusted select-all first, and a trailing editor newline is ignored. Returns `filled:true`, `value` |
-| `insert_text` | `target`, non-empty string `value` | Append at the end of an input/textarea/contenteditable without clearing (the caret is moved with a trusted keystroke, so rich editors follow), then verify the field ends with it. Returns `inserted:true`, `value` |
+| `insert_text` | `target`, non-empty string `value`, optional `position: "end"\|"caret"` | Insert without clearing. The default `end` moves the caret to the end; revision 11 adds `caret`, which preserves the current cursor/selection inside the target and verifies the text before the resulting caret. Place the cursor with a click or trusted key before using `caret`. Returns `inserted:true`, `value` |
 | `press` | `key`, optional `target` | Focus target and dispatch a key, e.g. Enter, Tab, Escape, ArrowDown, Control+a, Meta+a |
 | `select_option` | `target`, string array `values` | Native select values; dispatch input/change, return selected `values` |
 | `set_checked` | `target`, boolean `checked` | Set/verify native checkbox or radio; a radio cannot be unchecked directly |
@@ -472,3 +472,5 @@ Go-request and client-read deadlines.
 [cli/douyin/README.md](cli/douyin/README.md) documents the China Douyin CLI: video upload, local browser drafts, publishing with browser response verification, resumable state and structured errors. It requires extension revision 10 and defaults to port 12345.
 
 Video Channels (WeChat) automation and native scheduled publication are documented in [cli/wechat_channels](cli/wechat_channels/README.md). Douyin supports `post --schedule-at` and `recent`; [the publication-plan runner](cli/PUBLISHING.md) reconciles backend rows before scheduling one next episode per platform and persists each confirmed result.
+
+[Medium](cli/medium/README.md), [LinkedIn](cli/linkedin/README.md), and [Facebook](cli/facebook/README.md) provide browser-only publishing workflows using the managed-tab API and existing Chrome login sessions. Medium uploads local article images through intercepted browser file choosers; no platform API credentials are needed.
